@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <meta name="theme-color" content="#1a2a4a" />
   <title>Dictation Practice</title>
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 
   <header class="app-header">
-    <h1>🎧 Dictation Practice</h1>
+    <div class="header-top">
+      <h1>🎧 Dictation Practice</h1>
+      <button class="btn-settings" onclick="toggleSettings()" title="Azure設定">⚙</button>
+    </div>
     <nav class="tab-bar">
       <button class="tab-btn active" data-mode="B" onclick="switchTab('B')">
         Part B
@@ -28,7 +31,37 @@
 
   <div class="toast" id="toast"></div>
 
-  <script src="data.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <!-- Settings overlay -->
+  <div class="settings-overlay" id="settings-overlay" onclick="handleOverlayClick(event)">
+    <div class="settings-panel">
+      <h2 style="font-size:1.1rem;font-weight:700;color:#1a2a4a;margin-bottom:4px;">Azure Speech 設定</h2>
+      <p style="font-size:0.82rem;color:#9aa0ac;margin-bottom:16px;">
+        発音スコア機能（フォネーム評価）を使うには Azure Speech Service のキーが必要です。<br>
+        無料枠: 5時間/月
+      </p>
+
+      <div class="settings-field">
+        <label for="azure-key-input">サブスクリプションキー</label>
+        <input type="password" id="azure-key-input" placeholder="例: a1b2c3d4e5f6..." autocomplete="off" />
+      </div>
+
+      <div class="settings-field">
+        <label for="azure-region-input">リージョン</label>
+        <input type="text" id="azure-region-input" placeholder="例: japaneast" autocomplete="off" />
+      </div>
+
+      <div class="azure-status" id="azure-status"></div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" onclick="saveAzureSettings()">保存</button>
+        <button class="btn btn-secondary" onclick="clearAzureSettings()">クリア</button>
+        <button class="btn btn-secondary" onclick="toggleSettings()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.35.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js" defer></script>
+  <script src="data.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

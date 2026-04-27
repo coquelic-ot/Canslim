@@ -62,6 +62,230 @@ function speakCurrent() {
   speak(text);
 }
 
+// ── Azure Config ─────────────────────────────────────────────
+
+function getAzureConfig() {
+  return { key: localStorage.getItem('azure_key') || '', region: localStorage.getItem('azure_region') || '' };
+}
+
+function hasAzureConfig() {
+  const c = getAzureConfig();
+  return c.key.length > 0 && c.region.length > 0;
+}
+
+// ── Settings modal ───────────────────────────────────────────
+
+function toggleSettings() {
+  const overlay = document.getElementById('settings-overlay');
+  if (!overlay) return;
+  const isOpen = overlay.classList.contains('open');
+  if (!isOpen) {
+    // Populate inputs with current values before opening
+    const cfg = getAzureConfig();
+    const keyInput = document.getElementById('azure-key-input');
+    const regionInput = document.getElementById('azure-region-input');
+    if (keyInput) keyInput.value = cfg.key;
+    if (regionInput) regionInput.value = cfg.region;
+    updateAzureStatus();
+  }
+  overlay.classList.toggle('open');
+}
+
+function handleOverlayClick(event) {
+  if (event.target === event.currentTarget) toggleSettings();
+}
+
+function updateAzureStatus() {
+  const statusEl = document.getElementById('azure-status');
+  if (!statusEl) return;
+  if (hasAzureConfig()) {
+    statusEl.textContent = '設定済み ✓';
+    statusEl.classList.add('configured');
+  } else {
+    statusEl.textContent = '未設定';
+    statusEl.classList.remove('configured');
+  }
+}
+
+function saveAzureSettings() {
+  const key = (document.getElementById('azure-key-input')?.value || '').trim();
+  const region = (document.getElementById('azure-region-input')?.value || '').trim();
+  if (key) localStorage.setItem('azure_key', key);
+  if (region) localStorage.setItem('azure_region', region);
+  updateAzureStatus();
+  showToast('Azure設定を保存しました');
+  const overlay = document.getElementById('settings-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function clearAzureSettings() {
+  localStorage.removeItem('azure_key');
+  localStorage.removeItem('azure_region');
+  const keyInput = document.getElementById('azure-key-input');
+  const regionInput = document.getElementById('azure-region-input');
+  if (keyInput) keyInput.value = '';
+  if (regionInput) regionInput.value = '';
+  updateAzureStatus();
+  showToast('Azure設定をクリアしました');
+}
+
+// ── Vowel hint map ────────────────────────────────────────────
+
+const VOWEL_HINTS = {
+  AE: { symbol: '/æ/', label: 'American a', hint: '口を横に広げ「エア」— cat, apple, man の a' },
+  AA: { symbol: '/ɑː/', label: 'broad a', hint: '口を縦に大きく開け「アー」— father, stop の a/o' },
+  EY: { symbol: '/eɪ/', label: 'long a', hint: '「エイ」と二重母音— name, cake の a' },
+  IY: { symbol: '/iː/', label: 'long e', hint: '長い「イー」— see, be の e' },
+  IH: { symbol: '/ɪ/', label: 'short i', hint: '短く弱い「イ」— sit, bit の i' },
+  AH: { symbol: '/ʌ/', label: 'short u', hint: '「ア」を弱く短く— but, cup の u' },
+  UW: { symbol: '/uː/', label: 'long u', hint: '唇を丸めて「ウー」— food, true の u' },
+  UH: { symbol: '/ʊ/', label: 'short u', hint: '短い「ウ」— book, put の u' },
+  OW: { symbol: '/oʊ/', label: 'long o', hint: '「オウ」と二重母音— go, home の o' },
+  AO: { symbol: '/ɔː/', label: 'aw sound', hint: '唇を丸めて「オー」— call, fall の a' },
+  EH: { symbol: '/ɛ/', label: 'short e', hint: '口を少し開けた「エ」— bed, head の e' },
+  AW: { symbol: '/aʊ/', label: 'ow sound', hint: '「アウ」と二重母音— how, now の ow' },
+  AY: { symbol: '/aɪ/', label: 'long i', hint: '「アイ」と二重母音— time, like の i' },
+};
+const VOWEL_PHONEMES = new Set(Object.keys(VOWEL_HINTS));
+
+// ── Azure Speech Assessment ───────────────────────────────────
+
+function assessWithAzure(correctSentence) {
+  // Stop any TTS before recording
+  window.speechSynthesis && window.speechSynthesis.cancel();
+
+  // Reset state for re-recording
+  state.transcript = null;
+  const recognized = document.getElementById('recognized-text');
+  if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
+  const resultArea = document.getElementById('result-area');
+  if (resultArea) resultArea.classList.remove('visible');
+  const nextBtn = document.getElementById('btn-next');
+  if (nextBtn) nextBtn.style.display = 'none';
+  if (state.scored) { state.results.pop(); state.scored = false; }
+  const pronFeedback = document.getElementById('pron-feedback');
+  if (pronFeedback) pronFeedback.classList.remove('visible');
+
+  try {
+    const cfg = getAzureConfig();
+    const SpeechSDK = window.SpeechSDK;
+    const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(cfg.key, cfg.region);
+    speechConfig.speechRecognitionLanguage = 'en-US';
+
+    const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+    const pronConfig = new SpeechSDK.PronunciationAssessmentConfig(
+      correctSentence,
+      SpeechSDK.PronunciationAssessmentGradingSystem.HundredMark,
+      SpeechSDK.PronunciationAssessmentGranularity.Phoneme,
+      true // enableMiscue
+    );
+
+    const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+    pronConfig.applyTo(recognizer);
+
+    // Set mic button to recording state
+    const btn = document.getElementById('btn-mic');
+    if (btn) {
+      btn.textContent = '🔴 録音中…';
+      btn.classList.add('recording');
+      btn.disabled = true;
+    }
+
+    recognizer.recognizeOnceAsync(
+      (result) => {
+        recognizer.close();
+        if (result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
+          const pronResult = SpeechSDK.PronunciationAssessmentResult.fromResult(result);
+          finishWithAzureResult(result.text, pronResult, correctSentence);
+        } else if (result.reason === SpeechSDK.ResultReason.NoMatch) {
+          showToast('音声が聞き取れませんでした。もう一度お試しください');
+          resetMicButton(correctSentence);
+        } else {
+          showToast('認識エラーが発生しました。もう一度お試しください');
+          resetMicButton(correctSentence);
+        }
+      },
+      (err) => {
+        recognizer.close();
+        showToast('認識エラー: ' + err);
+        resetMicButton(correctSentence);
+      }
+    );
+  } catch (e) {
+    showToast('Azure設定エラー: ' + e.message);
+    resetMicButton(correctSentence);
+  }
+}
+
+function finishWithAzureResult(transcript, pronResult, correctSentence) {
+  state.transcript = transcript;
+  resetMicButton(correctSentence);
+
+  const recognized = document.getElementById('recognized-text');
+  if (recognized) {
+    recognized.textContent = '認識: ' + transcript;
+    recognized.classList.add('visible');
+  }
+
+  submitAnswer(correctSentence);
+  renderPronunciationFeedback(pronResult);
+}
+
+function renderPronunciationFeedback(pronResult) {
+  try {
+    const detailResult = pronResult.detailResult || {};
+    const words = detailResult.Words || [];
+    const accuracyScore = Math.round(pronResult.accuracyScore || 0);
+
+    const issues = [];
+    for (const w of words) {
+      if (w.ErrorType === 'Insertion') continue;
+      const badVowels = (w.Phonemes || []).filter(p =>
+        VOWEL_PHONEMES.has(p.Phoneme) &&
+        (p.PronunciationAssessment?.AccuracyScore ?? 100) < 70
+      );
+      if (badVowels.length) issues.push({ word: w.Word, phonemes: badVowels });
+    }
+
+    // Build score badge
+    let scoreClass = 'good';
+    if (accuracyScore < 80) scoreClass = 'ok';
+    if (accuracyScore < 60) scoreClass = 'poor';
+
+    let html = `<div class="pron-score ${scoreClass}">発音スコア: ${accuracyScore}点</div>`;
+
+    if (issues.length === 0) {
+      html += `<div class="pron-good">母音の発音 良好 👍</div>`;
+    } else {
+      for (const issue of issues) {
+        const phonemeTags = issue.phonemes.map(p => {
+          const hint = VOWEL_HINTS[p.Phoneme];
+          if (!hint) return '';
+          return `<span class="phoneme-tag"><span class="ph-symbol">${hint.symbol}</span><span class="ph-hint">${hint.hint}</span></span>`;
+        }).join('');
+        html += `<div class="pron-issue"><span class="pron-word">${issue.word}</span>${phonemeTags}</div>`;
+      }
+    }
+
+    // Insert or update pron-feedback div after result-area
+    let feedbackEl = document.getElementById('pron-feedback');
+    if (!feedbackEl) {
+      feedbackEl = document.createElement('div');
+      feedbackEl.id = 'pron-feedback';
+      feedbackEl.className = 'pron-feedback';
+      const resultArea = document.getElementById('result-area');
+      if (resultArea && resultArea.parentNode) {
+        resultArea.parentNode.insertBefore(feedbackEl, resultArea.nextSibling);
+      }
+    }
+    feedbackEl.innerHTML = html;
+    feedbackEl.classList.add('visible');
+  } catch (e) {
+    // Silently fail if pronunciation result parsing fails
+  }
+}
+
 // ── Speech Recognition ───────────────────────────────────────
 
 function getSpeechRecognition() {
@@ -69,6 +293,12 @@ function getSpeechRecognition() {
 }
 
 function startListening(correctSentence) {
+  // Use Azure if configured and SDK is loaded
+  if (hasAzureConfig() && typeof SpeechSDK !== 'undefined') {
+    assessWithAzure(correctSentence);
+    return;
+  }
+
   const SR = getSpeechRecognition();
   if (!SR) {
     showToast('このブラウザは音声認識に対応していません（Chrome推奨）');
@@ -93,6 +323,9 @@ function startListening(correctSentence) {
   if (nextBtn) nextBtn.style.display = 'none';
   // 前の採点分を results から取り除く（録音し直しは同じ問題の再挑戦）
   if (state.scored) { state.results.pop(); state.scored = false; }
+  // Clear any pronunciation feedback from previous attempt
+  const pronFeedback = document.getElementById('pron-feedback');
+  if (pronFeedback) pronFeedback.classList.remove('visible');
 
   const rec = new SR();
   rec.lang = 'en-US';
@@ -550,5 +783,6 @@ if (window.speechSynthesis) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  updateAzureStatus();
   switchTab('B');
 });

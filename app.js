@@ -151,7 +151,6 @@ function submitAnswer(correctSentence) {
   state.scored = true;
   renderResult(wordResults, pct);
 
-  document.getElementById('btn-check').style.display = 'none';
   document.getElementById('btn-next').style.display = 'block';
   updateProgress();
 }

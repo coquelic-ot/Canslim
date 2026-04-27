@@ -84,8 +84,6 @@ function startListening(correctSentence) {
   state.transcript = null;
   const recognized = document.getElementById('recognized-text');
   if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
-  const checkBtn = document.getElementById('btn-check');
-  if (checkBtn) checkBtn.style.display = 'none';
   const resultArea = document.getElementById('result-area');
   if (resultArea) resultArea.classList.remove('visible');
   const nextBtn = document.getElementById('btn-next');
@@ -144,16 +142,10 @@ function finishListening(transcript, correctSentence) {
     recognized.classList.add('visible');
   }
 
-  const checkBtn = document.getElementById('btn-check');
-  if (checkBtn) checkBtn.style.display = 'block';
+  submitAnswer(correctSentence);
 }
 
 function submitAnswer(correctSentence) {
-  if (!state.transcript) {
-    showToast('先にマイクで話してください');
-    return;
-  }
-
   const { wordResults, pct } = scoreAnswer(state.transcript, correctSentence);
   state.results.push({ pct });
   state.scored = true;
@@ -316,9 +308,6 @@ function renderPartB() {
 
       <div class="recognized-text" id="recognized-text"></div>
 
-      <button class="btn btn-check" id="btn-check" style="display:none"
-        onclick="submitAnswer('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
-
       <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>
@@ -410,9 +399,6 @@ function renderPartC() {
       </button>
 
       <div class="recognized-text" id="recognized-text"></div>
-
-      <button class="btn btn-check" id="btn-check" style="display:none"
-        onclick="submitAnswer('${item.full.replace(/'/g, "\\'")}')">採点する</button>
 
       <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-hint" onclick="toggleHint()">チャンクヒント</button>

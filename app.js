@@ -10,6 +10,7 @@ const state = {
   results: [],
   recognition: null,
   transcript: null,
+  scored: false,
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -79,12 +80,18 @@ function startListening(correctSentence) {
     state.recognition = null;
   }
 
-  // やり直し時：前の認識テキストと採点ボタンを隠す
+  // やり直し時：前の認識テキスト・採点ボタン・結果・次へボタンをリセット
   state.transcript = null;
   const recognized = document.getElementById('recognized-text');
   if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
   const checkBtn = document.getElementById('btn-check');
   if (checkBtn) checkBtn.style.display = 'none';
+  const resultArea = document.getElementById('result-area');
+  if (resultArea) resultArea.classList.remove('visible');
+  const nextBtn = document.getElementById('btn-next');
+  if (nextBtn) nextBtn.style.display = 'none';
+  // 前の採点分を results から取り除く（録音し直しは同じ問題の再挑戦）
+  if (state.scored) { state.results.pop(); state.scored = false; }
 
   const rec = new SR();
   rec.lang = 'en-US';
@@ -149,10 +156,10 @@ function submitAnswer(correctSentence) {
 
   const { wordResults, pct } = scoreAnswer(state.transcript, correctSentence);
   state.results.push({ pct });
+  state.scored = true;
   renderResult(wordResults, pct);
 
   document.getElementById('btn-check').style.display = 'none';
-  document.getElementById('btn-mic').disabled = true;
   document.getElementById('btn-next').style.display = 'block';
   updateProgress();
 }
@@ -338,6 +345,8 @@ function renderPartB() {
 
 function nextQuestionB() {
   state.currentIndex++;
+  state.transcript = null;
+  state.scored = false;
   renderPartB();
 }
 
@@ -442,6 +451,8 @@ function speakChunk(index) {
 
 function nextQuestionC() {
   state.currentIndex++;
+  state.transcript = null;
+  state.scored = false;
   renderPartC();
 }
 

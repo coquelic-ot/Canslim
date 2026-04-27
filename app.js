@@ -99,9 +99,9 @@ function startListening(correctSentence) {
 
   const btn = document.getElementById('btn-mic');
   if (btn) {
-    btn.textContent = '⏹ 録音中…';
+    btn.textContent = '🔴 録音中…';
     btn.classList.add('recording');
-    btn.onclick = () => { rec.stop(); };
+    btn.disabled = true;
   }
 
   rec.onresult = (event) => {

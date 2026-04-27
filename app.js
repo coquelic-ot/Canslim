@@ -4,14 +4,11 @@
 
 // ── State ──────────────────────────────────────────────────
 const state = {
-  mode: 'B',          // 'B' | 'C'
+  mode: 'B',
   currentIndex: 0,
   slowMode: false,
-  results: [],        // { correct: boolean } per question
-  checked: false,
-  answerVisible: false,
-  translationVisible: false,
-  hintVisible: false,
+  results: [],
+  recognition: null,
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -60,15 +57,106 @@ function speakCurrent() {
   speak(text);
 }
 
+// ── Speech Recognition ───────────────────────────────────────
+
+function getSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function startListening(correctSentence) {
+  const SR = getSpeechRecognition();
+  if (!SR) {
+    showToast('このブラウザは音声認識に対応していません（Chrome推奨）');
+    return;
+  }
+
+  // Stop any TTS before recording
+  window.speechSynthesis && window.speechSynthesis.cancel();
+
+  if (state.recognition) {
+    state.recognition.abort();
+    state.recognition = null;
+  }
+
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  state.recognition = rec;
+
+  const btn = document.getElementById('btn-mic');
+  if (btn) {
+    btn.textContent = '⏹ 録音中…';
+    btn.classList.add('recording');
+    btn.disabled = false;
+    btn.onclick = () => { rec.stop(); };
+  }
+
+  rec.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    finishListening(transcript, correctSentence);
+  };
+
+  rec.onerror = (event) => {
+    resetMicButton();
+    if (event.error === 'not-allowed') {
+      showToast('マイクの使用を許可してください');
+    } else if (event.error === 'no-speech') {
+      showToast('音声が聞き取れませんでした。もう一度お試しください');
+    } else {
+      showToast('認識エラー: ' + event.error);
+    }
+  };
+
+  rec.onend = () => {
+    resetMicButton();
+    state.recognition = null;
+  };
+
+  rec.start();
+}
+
+function finishListening(transcript, correctSentence) {
+  state.recognition = null;
+  resetMicButton();
+
+  // Show what was recognized
+  const recognized = document.getElementById('recognized-text');
+  if (recognized) {
+    recognized.textContent = '認識: ' + transcript;
+    recognized.classList.add('visible');
+  }
+
+  const { wordResults, pct } = scoreAnswer(transcript, correctSentence);
+  state.results.push({ pct });
+  renderResult(wordResults, pct);
+
+  const nextBtn = document.getElementById('btn-next');
+  if (nextBtn) nextBtn.style.display = 'block';
+
+  const micBtn = document.getElementById('btn-mic');
+  if (micBtn) micBtn.disabled = true;
+
+  updateProgress();
+}
+
+function resetMicButton() {
+  const btn = document.getElementById('btn-mic');
+  if (!btn) return;
+  btn.textContent = '🎤 マイクで答える';
+  btn.classList.remove('recording');
+  btn.disabled = false;
+  const item = currentItem();
+  const correct = state.mode === 'B' ? item.sentence : item.full;
+  btn.onclick = () => startListening(correct);
+}
+
 // ── Scoring ─────────────────────────────────────────────────
 
 function scoreAnswer(userInput, correctSentence) {
-  const userWords   = tokenize(userInput).map(normalize);
+  const userWords    = tokenize(userInput).map(normalize);
   const correctWords = tokenize(correctSentence).map(normalize);
-
-  const wordResults = [];
-
-  // Diff: compare word by word at same position, then mark extras/missing
+  const wordResults  = [];
   const maxLen = Math.max(userWords.length, correctWords.length);
 
   for (let i = 0; i < maxLen; i++) {
@@ -76,10 +164,8 @@ function scoreAnswer(userInput, correctSentence) {
     const c = correctWords[i];
 
     if (c === undefined) {
-      // extra words typed
       wordResults.push({ display: u, status: 'wrong' });
     } else if (u === undefined) {
-      // missing words
       wordResults.push({ display: c, status: 'missing' });
     } else if (u === c) {
       wordResults.push({ display: tokenize(correctSentence)[i], status: 'correct' });
@@ -112,13 +198,13 @@ function renderResult(wordResults, pct) {
   const summary = document.getElementById('result-summary');
   if (pct === 100) {
     summary.className = 'result-summary all-correct';
-    summary.textContent = '完璧です！ ';
+    summary.textContent = '完璧です！';
   } else if (pct >= 60) {
     summary.className = 'result-summary partial';
-    summary.textContent = `${pct}% 正解 — もう一度聞いてみましょう`;
+    summary.textContent = `${pct}% 正解 — もう一度聞いて繰り返しましょう`;
   } else {
     summary.className = 'result-summary wrong';
-    summary.textContent = `${pct}% 正解 — 答えを確認して繰り返し練習しましょう`;
+    summary.textContent = `${pct}% 正解 — 答えを確認して練習しましょう`;
   }
 
   document.getElementById('result-area').classList.add('visible');
@@ -137,7 +223,7 @@ function updateProgress() {
   document.getElementById('progress-score').textContent =
     done > 0 ? `正解率 ${overallPct}%` : '';
 
-  const fillPct = total > 0 ? ((state.currentIndex) / total) * 100 : 0;
+  const fillPct = total > 0 ? (state.currentIndex / total) * 100 : 0;
   document.getElementById('progress-bar-fill').style.width = fillPct + '%';
 }
 
@@ -149,18 +235,41 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── Shared toggles ───────────────────────────────────────────
+
+function toggleAnswer() {
+  const box = document.getElementById('answer-box');
+  const btn = document.getElementById('btn-reveal');
+  const visible = box.classList.toggle('visible');
+  btn.textContent = visible ? '答えを隠す' : '答えを見る';
+}
+
+function toggleTranslation() {
+  const box = document.getElementById('translation-box');
+  const btn = document.getElementById('btn-trans');
+  const visible = box.classList.toggle('visible');
+  btn.textContent = visible ? '訳を隠す' : '訳を見る';
+}
+
+function toggleHint() {
+  const box = document.getElementById('hint-box');
+  const btn = document.getElementById('btn-hint');
+  const visible = box.classList.toggle('visible');
+  btn.textContent = visible ? 'ヒントを隠す' : 'チャンクヒント';
 }
 
 // ── Part B ───────────────────────────────────────────────────
 
 function renderPartB() {
-  const item = currentItem();
-  const total = PART_B.length;
+  const item   = currentItem();
+  const total  = PART_B.length;
   const isLast = state.currentIndex === total - 1;
 
   document.getElementById('partb-panel').innerHTML = `
-    <div class="progress-section" id="progress-section">
+    <div class="progress-section">
       <div class="progress-meta">
         <span id="progress-text">Q ${state.currentIndex + 1} / ${total}</span>
         <span class="progress-score" id="progress-score"></span>
@@ -172,25 +281,19 @@ function renderPartB() {
 
     <div class="card">
       <div class="play-controls">
-        <button class="btn btn-play" id="btn-play" onclick="speakCurrent()">
-          ▶ 再生
-        </button>
+        <button class="btn btn-play" onclick="speakCurrent()">▶ 再生</button>
         <button class="btn btn-slow ${state.slowMode ? 'active' : ''}" id="btn-slow" onclick="toggleSlow()">
           ${state.slowMode ? '🐢 スロー ON' : '🐢 スロー'}
         </button>
       </div>
 
-      <textarea
-        class="dictation-textarea"
-        id="dictation-input"
-        placeholder="聞こえた英文を入力してください…"
-        rows="3"
-      ></textarea>
+      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.sentence.replace(/'/g, "\\'")}')">
+        🎤 マイクで答える
+      </button>
 
-      <div class="action-row">
-        <button class="btn btn-check" id="btn-check" onclick="checkAnswerB()">採点する</button>
-      </div>
-      <div class="action-row">
+      <div class="recognized-text" id="recognized-text"></div>
+
+      <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>
       </div>
@@ -212,47 +315,10 @@ function renderPartB() {
   `;
 
   updateProgress();
-  setTimeout(() => document.getElementById('dictation-input').focus(), 100);
-}
-
-function checkAnswerB() {
-  const input = document.getElementById('dictation-input').value;
-  if (!input.trim()) {
-    showToast('英文を入力してください');
-    return;
-  }
-  const item = currentItem();
-  const { wordResults, pct } = scoreAnswer(input, item.sentence);
-
-  state.checked = true;
-  state.results.push({ pct });
-
-  renderResult(wordResults, pct);
-  document.getElementById('btn-next').style.display = 'block';
-  document.getElementById('btn-check').disabled = true;
-  document.getElementById('dictation-input').disabled = true;
-  updateProgress();
-}
-
-function toggleAnswer() {
-  const box = document.getElementById('answer-box');
-  const btn = document.getElementById('btn-reveal');
-  const visible = box.classList.toggle('visible');
-  btn.textContent = visible ? '答えを隠す' : '答えを見る';
-}
-
-function toggleTranslation() {
-  const box = document.getElementById('translation-box');
-  const btn = document.getElementById('btn-trans');
-  const visible = box.classList.toggle('visible');
-  btn.textContent = visible ? '訳を隠す' : '訳を見る';
 }
 
 function nextQuestionB() {
   state.currentIndex++;
-  state.checked = false;
-  state.answerVisible = false;
-  state.translationVisible = false;
   renderPartB();
 }
 
@@ -277,8 +343,8 @@ function showCompletedB() {
 // ── Part C ───────────────────────────────────────────────────
 
 function renderPartC() {
-  const item  = currentItem();
-  const total = PART_C.length;
+  const item   = currentItem();
+  const total  = PART_C.length;
   const isLast = state.currentIndex === total - 1;
 
   const chunkButtons = item.chunks.map((chunk, i) => `
@@ -288,7 +354,7 @@ function renderPartC() {
   `).join('');
 
   document.getElementById('partc-panel').innerHTML = `
-    <div class="progress-section" id="progress-section">
+    <div class="progress-section">
       <div class="progress-meta">
         <span id="progress-text">Q ${state.currentIndex + 1} / ${total}</span>
         <span class="progress-score" id="progress-score"></span>
@@ -311,17 +377,13 @@ function renderPartC() {
         <div class="chunk-buttons">${chunkButtons}</div>
       </div>
 
-      <textarea
-        class="dictation-textarea"
-        id="dictation-input"
-        placeholder="全文を書き取ってください…"
-        rows="3"
-      ></textarea>
+      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.full.replace(/'/g, "\\'")}')">
+        🎤 マイクで答える
+      </button>
 
-      <div class="action-row">
-        <button class="btn btn-check" id="btn-check" onclick="checkAnswerC()">採点する</button>
-      </div>
-      <div class="action-row">
+      <div class="recognized-text" id="recognized-text"></div>
+
+      <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-hint" onclick="toggleHint()">チャンクヒント</button>
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>
@@ -350,37 +412,10 @@ function renderPartC() {
   `;
 
   updateProgress();
-  setTimeout(() => document.getElementById('dictation-input').focus(), 100);
 }
 
 function speakChunk(index) {
-  const chunk = currentItem().chunks[index];
-  speak(chunk);
-}
-
-function checkAnswerC() {
-  const input = document.getElementById('dictation-input').value;
-  if (!input.trim()) {
-    showToast('英文を入力してください');
-    return;
-  }
-  const item = currentItem();
-  const { wordResults, pct } = scoreAnswer(input, item.full);
-
-  state.results.push({ pct });
-
-  renderResult(wordResults, pct);
-  document.getElementById('btn-next').style.display = 'block';
-  document.getElementById('btn-check').disabled = true;
-  document.getElementById('dictation-input').disabled = true;
-  updateProgress();
-}
-
-function toggleHint() {
-  const box = document.getElementById('hint-box');
-  const btn = document.getElementById('btn-hint');
-  const visible = box.classList.toggle('visible');
-  btn.textContent = visible ? 'ヒントを隠す' : 'チャンクヒント';
+  speak(currentItem().chunks[index]);
 }
 
 function nextQuestionC() {
@@ -424,6 +459,11 @@ function switchTab(mode) {
   state.results = [];
   state.slowMode = false;
 
+  if (state.recognition) {
+    state.recognition.abort();
+    state.recognition = null;
+  }
+
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
@@ -449,23 +489,8 @@ function toggleSlow() {
   showToast(state.slowMode ? 'スロー再生 ON (×0.7)' : '通常速度に戻しました');
 }
 
-// ── Keyboard shortcuts ───────────────────────────────────────
-
-document.addEventListener('keydown', e => {
-  // Enter in textarea → 採点
-  if (e.key === 'Enter' && !e.shiftKey) {
-    const active = document.activeElement;
-    if (active && active.id === 'dictation-input') {
-      e.preventDefault();
-      const checkBtn = document.getElementById('btn-check');
-      if (checkBtn && !checkBtn.disabled) checkBtn.click();
-    }
-  }
-});
-
 // ── Init ─────────────────────────────────────────────────────
 
-// Preload voices (required by some browsers)
 if (window.speechSynthesis) {
   window.speechSynthesis.getVoices();
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();

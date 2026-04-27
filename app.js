@@ -79,6 +79,13 @@ function startListening(correctSentence) {
     state.recognition = null;
   }
 
+  // やり直し時：前の認識テキストと採点ボタンを隠す
+  state.transcript = null;
+  const recognized = document.getElementById('recognized-text');
+  if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
+  const checkBtn = document.getElementById('btn-check');
+  if (checkBtn) checkBtn.style.display = 'none';
+
   const rec = new SR();
   rec.lang = 'en-US';
   rec.interimResults = false;
@@ -89,7 +96,6 @@ function startListening(correctSentence) {
   if (btn) {
     btn.textContent = '⏹ 録音中…';
     btn.classList.add('recording');
-    btn.disabled = false;
     btn.onclick = () => { rec.stop(); };
   }
 
@@ -99,7 +105,8 @@ function startListening(correctSentence) {
   };
 
   rec.onerror = (event) => {
-    resetMicButton();
+    state.recognition = null;
+    resetMicButton(correctSentence);
     if (event.error === 'not-allowed') {
       showToast('マイクの使用を許可してください');
     } else if (event.error === 'no-speech') {
@@ -109,9 +116,11 @@ function startListening(correctSentence) {
     }
   };
 
+  // onend は onresult の後に必ず呼ばれる。onresult が来た場合は
+  // finishListening 内で既にリセット済みなので、transcript がある場合はスキップ。
   rec.onend = () => {
-    resetMicButton();
     state.recognition = null;
+    if (!state.transcript) resetMicButton(correctSentence);
   };
 
   rec.start();
@@ -120,7 +129,7 @@ function startListening(correctSentence) {
 function finishListening(transcript, correctSentence) {
   state.recognition = null;
   state.transcript = transcript;
-  resetMicButton();
+  resetMicButton(correctSentence);
 
   const recognized = document.getElementById('recognized-text');
   if (recognized) {
@@ -148,14 +157,13 @@ function submitAnswer(correctSentence) {
   updateProgress();
 }
 
-function resetMicButton() {
+function resetMicButton(correctSentence) {
   const btn = document.getElementById('btn-mic');
   if (!btn) return;
   btn.textContent = '🎤 マイクで答える';
   btn.classList.remove('recording');
   btn.disabled = false;
-  const item = currentItem();
-  const correct = state.mode === 'B' ? item.sentence : item.full;
+  const correct = correctSentence || (state.mode === 'B' ? currentItem().sentence : currentItem().full);
   btn.onclick = () => startListening(correct);
 }
 

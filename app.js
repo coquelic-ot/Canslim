@@ -7,15 +7,18 @@ const state = {
   mode: 'B',
   currentIndex: 0,
   slowMode: false,
-  results: [],
+  results: [],       // { pct, item }
   recognition: null,
   transcript: null,
   scored: false,
+  reviewMode: false,
+  reviewData: [],
 };
 
 // ── Helpers ─────────────────────────────────────────────────
 
 function currentData() {
+  if (state.reviewMode) return state.reviewData;
   return state.mode === 'B' ? PART_B : PART_C;
 }
 
@@ -147,7 +150,7 @@ function finishListening(transcript, correctSentence) {
 
 function submitAnswer(correctSentence) {
   const { wordResults, pct } = scoreAnswer(state.transcript, correctSentence);
-  state.results.push({ pct });
+  state.results.push({ pct, item: currentItem() });
   state.scored = true;
   renderResult(wordResults, pct);
 
@@ -233,7 +236,9 @@ function updateProgress() {
   const overallPct = done > 0 ? Math.round((correct / done) * 100) : 0;
 
   document.getElementById('progress-text').textContent =
-    `Q ${state.currentIndex + 1} / ${total}`;
+    state.reviewMode
+      ? `復習 ${state.currentIndex + 1} / ${total}`
+      : `Q ${state.currentIndex + 1} / ${total}`;
   document.getElementById('progress-score').textContent =
     done > 0 ? `正解率 ${overallPct}%` : '';
 
@@ -339,19 +344,22 @@ function nextQuestionB() {
 }
 
 function showCompletedB() {
-  const correct = state.results.filter(r => r.pct === 100).length;
-  const total   = state.results.length;
-  const pct     = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const correct  = state.results.filter(r => r.pct === 100).length;
+  const total    = state.results.length;
+  const pct      = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const hasWrong = state.results.some(r => r.pct < 100);
+  const label    = state.reviewMode ? '復習' : '';
 
   document.getElementById('partb-panel').innerHTML = `
     <div class="card completed-card">
-      <div style="font-size:2.5rem;">🎉</div>
+      <div style="font-size:2.5rem;">${pct === 100 ? '🏆' : '🎉'}</div>
       <div class="big-score">${pct}%</div>
-      <div class="score-label">${correct} / ${total} 問 正解</div>
+      <div class="score-label">${correct} / ${total} 問 正解${label}</div>
       <p style="font-size:0.9rem;color:#666;margin-bottom:24px;">
-        お疲れ様でした！苦手だった問題は繰り返し練習しましょう。
+        ${pct === 100 ? '全問正解！素晴らしい！' : 'お疲れ様でした！'}
       </p>
-      <button class="btn-restart" onclick="restartMode('B')">もう一度挑戦する</button>
+      ${hasWrong ? `<button class="btn btn-next" style="margin-bottom:12px;width:100%;" onclick="startReview('B')">間違えた問題を復習する（${total - correct}問）</button>` : ''}
+      <button class="btn-restart" onclick="restartMode('B')">最初からやり直す</button>
     </div>
   `;
 }
@@ -442,30 +450,52 @@ function nextQuestionC() {
 }
 
 function showCompletedC() {
-  const correct = state.results.filter(r => r.pct === 100).length;
-  const total   = state.results.length;
-  const pct     = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const correct  = state.results.filter(r => r.pct === 100).length;
+  const total    = state.results.length;
+  const pct      = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const hasWrong = state.results.some(r => r.pct < 100);
+  const label    = state.reviewMode ? '復習' : '';
 
   document.getElementById('partc-panel').innerHTML = `
     <div class="card completed-card">
-      <div style="font-size:2.5rem;">🎉</div>
+      <div style="font-size:2.5rem;">${pct === 100 ? '🏆' : '🎉'}</div>
       <div class="big-score">${pct}%</div>
-      <div class="score-label">${correct} / ${total} 問 正解</div>
+      <div class="score-label">${correct} / ${total} 問 正解${label}</div>
       <p style="font-size:0.9rem;color:#666;margin-bottom:24px;">
-        お疲れ様でした！チャンクを意識して何度も繰り返しましょう。
+        ${pct === 100 ? '全問正解！素晴らしい！' : 'お疲れ様でした！'}
       </p>
-      <button class="btn-restart" onclick="restartMode('C')">もう一度挑戦する</button>
+      ${hasWrong ? `<button class="btn btn-next" style="margin-bottom:12px;width:100%;" onclick="startReview('C')">間違えた問題を復習する（${total - correct}問）</button>` : ''}
+      <button class="btn-restart" onclick="restartMode('C')">最初からやり直す</button>
     </div>
   `;
+}
+
+// ── Review ───────────────────────────────────────────────────
+
+function startReview(mode) {
+  const wrongItems = state.results.filter(r => r.pct < 100).map(r => r.item);
+  state.mode        = mode;
+  state.currentIndex = 0;
+  state.results     = [];
+  state.slowMode    = false;
+  state.transcript  = null;
+  state.scored      = false;
+  state.reviewMode  = true;
+  state.reviewData  = wrongItems;
+  if (mode === 'B') renderPartB();
+  else renderPartC();
 }
 
 // ── Restart ──────────────────────────────────────────────────
 
 function restartMode(mode) {
   state.currentIndex = 0;
-  state.results = [];
-  state.slowMode = false;
-  state.transcript = null;
+  state.results      = [];
+  state.slowMode     = false;
+  state.transcript   = null;
+  state.scored       = false;
+  state.reviewMode   = false;
+  state.reviewData   = [];
   if (mode === 'B') renderPartB();
   else renderPartC();
 }
@@ -482,7 +512,10 @@ function switchTab(mode) {
     state.recognition.abort();
     state.recognition = null;
   }
-  state.transcript = null;
+  state.transcript  = null;
+  state.scored      = false;
+  state.reviewMode  = false;
+  state.reviewData  = [];
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);

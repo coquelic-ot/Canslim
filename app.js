@@ -9,6 +9,7 @@ const state = {
   slowMode: false,
   results: [],
   recognition: null,
+  transcript: null,
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -118,25 +119,32 @@ function startListening(correctSentence) {
 
 function finishListening(transcript, correctSentence) {
   state.recognition = null;
+  state.transcript = transcript;
   resetMicButton();
 
-  // Show what was recognized
   const recognized = document.getElementById('recognized-text');
   if (recognized) {
     recognized.textContent = '認識: ' + transcript;
     recognized.classList.add('visible');
   }
 
-  const { wordResults, pct } = scoreAnswer(transcript, correctSentence);
+  const checkBtn = document.getElementById('btn-check');
+  if (checkBtn) checkBtn.style.display = 'block';
+}
+
+function submitAnswer(correctSentence) {
+  if (!state.transcript) {
+    showToast('先にマイクで話してください');
+    return;
+  }
+
+  const { wordResults, pct } = scoreAnswer(state.transcript, correctSentence);
   state.results.push({ pct });
   renderResult(wordResults, pct);
 
-  const nextBtn = document.getElementById('btn-next');
-  if (nextBtn) nextBtn.style.display = 'block';
-
-  const micBtn = document.getElementById('btn-mic');
-  if (micBtn) micBtn.disabled = true;
-
+  document.getElementById('btn-check').style.display = 'none';
+  document.getElementById('btn-mic').disabled = true;
+  document.getElementById('btn-next').style.display = 'block';
   updateProgress();
 }
 
@@ -293,6 +301,9 @@ function renderPartB() {
 
       <div class="recognized-text" id="recognized-text"></div>
 
+      <button class="btn btn-check" id="btn-check" style="display:none"
+        onclick="submitAnswer('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
+
       <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>
@@ -383,6 +394,9 @@ function renderPartC() {
 
       <div class="recognized-text" id="recognized-text"></div>
 
+      <button class="btn btn-check" id="btn-check" style="display:none"
+        onclick="submitAnswer('${item.full.replace(/'/g, "\\'")}')">採点する</button>
+
       <div class="action-row" style="margin-top:12px;">
         <button class="btn btn-secondary" id="btn-hint" onclick="toggleHint()">チャンクヒント</button>
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
@@ -447,6 +461,7 @@ function restartMode(mode) {
   state.currentIndex = 0;
   state.results = [];
   state.slowMode = false;
+  state.transcript = null;
   if (mode === 'B') renderPartB();
   else renderPartC();
 }
@@ -463,6 +478,7 @@ function switchTab(mode) {
     state.recognition.abort();
     state.recognition = null;
   }
+  state.transcript = null;
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);

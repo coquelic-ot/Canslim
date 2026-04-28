@@ -340,12 +340,26 @@ function startListening(correctSentence) {
     btn.disabled = true;
   }
 
+  // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
+  let recTimeout = setTimeout(() => {
+    if (state.recognition === rec) {
+      try { rec.abort(); } catch (_) {}
+      state.recognition = null;
+      if (!state.transcript) {
+        resetMicButton(correctSentence);
+        showToast('録音がタイムアウトしました。もう一度お試しください');
+      }
+    }
+  }, 15000);
+
   rec.onresult = (event) => {
+    clearTimeout(recTimeout);
     const transcript = event.results[0][0].transcript;
     finishListening(transcript, correctSentence);
   };
 
   rec.onerror = (event) => {
+    clearTimeout(recTimeout);
     state.recognition = null;
     resetMicButton(correctSentence);
     if (event.error === 'not-allowed') {
@@ -357,14 +371,21 @@ function startListening(correctSentence) {
     }
   };
 
-  // onend は onresult の後に必ず呼ばれる。onresult が来た場合は
-  // finishListening 内で既にリセット済みなので、transcript がある場合はスキップ。
+  // onend では常にボタンをリセット（Safari iOS で onresult の後に onend が来ない場合の保険）
   rec.onend = () => {
+    clearTimeout(recTimeout);
     state.recognition = null;
-    if (!state.transcript) resetMicButton(correctSentence);
+    resetMicButton(correctSentence);
   };
 
-  rec.start();
+  try {
+    rec.start();
+  } catch (e) {
+    clearTimeout(recTimeout);
+    state.recognition = null;
+    resetMicButton(correctSentence);
+    showToast('マイクの起動に失敗しました。もう一度お試しください');
+  }
 }
 
 function finishListening(transcript, correctSentence) {

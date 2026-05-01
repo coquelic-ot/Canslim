@@ -401,15 +401,21 @@ body {
   border: 1.5px solid var(--warn);
 }
 
-.btn-shuffle {
-  background: var(--gray-200);
-  color: var(--gray-700);
+.btn-shuffle-icon {
+  border: none;
+  background: none;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.35;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.btn-shuffle.active {
+.btn-shuffle-icon.active {
+  opacity: 1;
   background: #ede9ff;
-  color: #6c5ce7;
-  border: 1.5px solid #6c5ce7;
 }
 
 .dictation-hint {

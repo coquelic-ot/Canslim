@@ -34,6 +34,13 @@ function shuffleArray(arr) {
 }
 
 function toggleShuffle() {
+  // Abort any ongoing recognition before resetting
+  if (state.recognition) {
+    const old = state.recognition;
+    state.recognition = null;
+    old.onresult = null; old.onerror = null; old.onend = null;
+    try { old.abort(); } catch (_) {}
+  }
   if (state.shuffledData) {
     state.shuffledData = null;
     showToast('元の順序に戻しました');
@@ -76,6 +83,7 @@ function normalize(str) {
 }
 
 function tokenize(str) {
+  if (!str) return [];
   return str.trim().split(/\s+/).filter(Boolean);
 }
 
@@ -471,12 +479,13 @@ function submitFromInput(correctSentence) {
 }
 
 function submitAnswer(correctSentence) {
-  const { wordResults, pct } = scoreAnswer(state.transcript, correctSentence);
+  const { wordResults, pct } = scoreAnswer(state.transcript || '', correctSentence);
   state.results.push({ pct, item: currentItem() });
   state.scored = true;
   renderResult(wordResults, pct);
 
-  document.getElementById('btn-next').style.display = 'block';
+  const nextBtn = document.getElementById('btn-next');
+  if (nextBtn) nextBtn.style.display = 'block';
   const skipBtn = document.getElementById('btn-skip');
   if (skipBtn) skipBtn.style.display = 'none';
   updateProgress();
@@ -673,17 +682,18 @@ function renderResult(wordResults, pct) {
     </div>${tipHtml}`;
   }).join('');
 
-  let pronSection = document.getElementById('pron-compare');
-  if (!pronSection) {
-    pronSection = document.createElement('div');
-    pronSection.id = 'pron-compare';
-    pronSection.className = 'pron-compare';
-    const resultArea = document.getElementById('result-area');
-    resultArea.appendChild(pronSection);
+  const resultArea = document.getElementById('result-area');
+  if (resultArea) {
+    let pronSection = document.getElementById('pron-compare');
+    if (!pronSection) {
+      pronSection = document.createElement('div');
+      pronSection.id = 'pron-compare';
+      pronSection.className = 'pron-compare';
+      resultArea.appendChild(pronSection);
+    }
+    pronSection.innerHTML = pronRows;
+    resultArea.classList.add('visible');
   }
-  pronSection.innerHTML = pronRows;
-
-  document.getElementById('result-area').classList.add('visible');
 }
 
 // ── Progress bar ─────────────────────────────────────────────
@@ -694,15 +704,17 @@ function updateProgress() {
   const correct = state.results.filter(r => r.pct === 100).length;
   const overallPct = done > 0 ? Math.round((correct / done) * 100) : 0;
 
-  document.getElementById('progress-text').textContent =
-    state.reviewMode
-      ? `復習 ${state.currentIndex + 1} / ${total}`
-      : `Q ${state.currentIndex + 1} / ${total}`;
-  document.getElementById('progress-score').textContent =
-    done > 0 ? `正解率 ${overallPct}%` : '';
+  const textLabel = state.reviewMode
+    ? `復習 ${state.currentIndex + 1} / ${total}`
+    : `Q ${state.currentIndex + 1} / ${total}`;
+  const textEl = document.getElementById('progress-text');
+  if (textEl) textEl.textContent = textLabel;
+  const scoreEl = document.getElementById('progress-score');
+  if (scoreEl) scoreEl.textContent = done > 0 ? `正解率 ${overallPct}%` : '';
 
   const fillPct = total > 0 ? (state.currentIndex / total) * 100 : 0;
-  document.getElementById('progress-bar-fill').style.width = fillPct + '%';
+  const fillEl = document.getElementById('progress-bar-fill');
+  if (fillEl) fillEl.style.width = fillPct + '%';
 }
 
 // ── Toast ────────────────────────────────────────────────────
@@ -743,7 +755,7 @@ function toggleHint() {
 
 function renderPartB() {
   const item   = currentItem();
-  const total  = PART_B.length;
+  const total  = currentData().length;
   const isLast = state.currentIndex === total - 1;
 
   document.getElementById('partb-panel').innerHTML = `
@@ -751,6 +763,7 @@ function renderPartB() {
       <div class="progress-meta">
         <span id="progress-text">Q ${state.currentIndex + 1} / ${total}</span>
         <span class="progress-score" id="progress-score"></span>
+        <button class="btn-shuffle-icon ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()" title="${state.shuffledData ? 'ランダム解除' : 'ランダム順'}">🔀</button>
       </div>
       <div class="progress-bar-track">
         <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
@@ -762,9 +775,6 @@ function renderPartB() {
         <button class="btn btn-play" onclick="speakCurrent()">▶ 再生</button>
         <button class="btn btn-slow ${state.slowMode ? 'active' : ''}" id="btn-slow" onclick="toggleSlow()">
           ${state.slowMode ? '🐢 スロー ON' : '🐢 スロー'}
-        </button>
-        <button class="btn btn-shuffle ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()">
-          🔀 ${state.shuffledData ? 'ランダム ON' : 'ランダム'}
         </button>
       </div>
 
@@ -836,7 +846,7 @@ function showCompletedB() {
 
 function renderPartC() {
   const item   = currentItem();
-  const total  = PART_C.length;
+  const total  = currentData().length;
   const isLast = state.currentIndex === total - 1;
 
   const chunkButtons = item.chunks.map((chunk, i) => `
@@ -850,6 +860,7 @@ function renderPartC() {
       <div class="progress-meta">
         <span id="progress-text">Q ${state.currentIndex + 1} / ${total}</span>
         <span class="progress-score" id="progress-score"></span>
+        <button class="btn-shuffle-icon ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()" title="${state.shuffledData ? 'ランダム解除' : 'ランダム順'}">🔀</button>
       </div>
       <div class="progress-bar-track">
         <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
@@ -861,9 +872,6 @@ function renderPartC() {
         <button class="btn btn-play" onclick="speakCurrent()">▶ 全文再生</button>
         <button class="btn btn-slow ${state.slowMode ? 'active' : ''}" id="btn-slow" onclick="toggleSlow()">
           ${state.slowMode ? '🐢 スロー ON' : '🐢 スロー'}
-        </button>
-        <button class="btn btn-shuffle ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()">
-          🔀 ${state.shuffledData ? 'ランダム ON' : 'ランダム'}
         </button>
       </div>
 

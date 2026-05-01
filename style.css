@@ -401,6 +401,21 @@ body {
   border: 1.5px solid var(--warn);
 }
 
+.btn-stop-rec {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  background: #fde8ea;
+  color: var(--wrong);
+  border: 1px solid var(--wrong);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+}
+
 .btn-check {
   background: var(--navy);
   color: var(--white);

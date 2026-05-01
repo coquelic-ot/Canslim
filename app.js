@@ -344,6 +344,8 @@ function startListening(correctSentence) {
     btn.classList.add('recording');
     btn.disabled = true; // iOS ダブルタッチによる即時 abort を防ぐ
   }
+  const stopBtn = document.getElementById('btn-stop');
+  if (stopBtn) stopBtn.style.display = 'block';
 
   // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
   let recTimeout = setTimeout(() => {
@@ -424,7 +426,28 @@ function submitAnswer(correctSentence) {
   updateProgress();
 }
 
+function stopListening() {
+  if (state.recognition) {
+    const old = state.recognition;
+    state.recognition = null;
+    old.onresult = null;
+    old.onerror = null;
+    old.onend = null;
+    try { old.abort(); } catch (_) {}
+  }
+  const stopBtn = document.getElementById('btn-stop');
+  if (stopBtn) stopBtn.style.display = 'none';
+  const btn = document.getElementById('btn-mic');
+  if (btn) {
+    btn.textContent = '🎤 マイクで答える';
+    btn.classList.remove('recording');
+    btn.disabled = false;
+  }
+}
+
 function resetMicButton(correctSentence) {
+  const stopBtn = document.getElementById('btn-stop');
+  if (stopBtn) stopBtn.style.display = 'none';
   const btn = document.getElementById('btn-mic');
   if (!btn) return;
   btn.textContent = '🎤 マイクで答える';
@@ -575,6 +598,7 @@ function renderPartB() {
       <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.sentence.replace(/'/g, "\\'")}')">
         🎤 マイクで答える
       </button>
+      <button class="btn-stop-rec" id="btn-stop" style="display:none" onclick="stopListening()">⏹ 録音を止める</button>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
         placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>
@@ -679,6 +703,7 @@ function renderPartC() {
       <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.full.replace(/'/g, "\\'")}')">
         🎤 マイクで答える
       </button>
+      <button class="btn-stop-rec" id="btn-stop" style="display:none" onclick="stopListening()">⏹ 録音を止める</button>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
         placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>

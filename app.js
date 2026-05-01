@@ -320,8 +320,8 @@ function startListening(correctSentence) {
 
   // やり直し時：テキスト欄・結果・次へボタンをリセット
   state.transcript = null;
-  const userInput = document.getElementById('user-input');
-  if (userInput) userInput.value = '';
+  const recognized = document.getElementById('recognized-text');
+  if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
   const resultArea = document.getElementById('result-area');
   if (resultArea) resultArea.classList.remove('visible');
   const nextBtn = document.getElementById('btn-next');
@@ -411,11 +411,13 @@ function finishListening(transcript, correctSentence) {
   state.transcript = transcript;
   resetMicButton(correctSentence);
 
-  const input = document.getElementById('user-input');
-  if (input) input.value = transcript;
+  const recognized = document.getElementById('recognized-text');
+  if (recognized && transcript) {
+    recognized.textContent = '認識: ' + transcript;
+    recognized.classList.add('visible');
+  }
 
-  // 認識結果があれば自動採点
-  if (transcript) submitAnswer(correctSentence);
+  submitAnswer(correctSentence);
 }
 
 function submitFromInput(correctSentence) {
@@ -474,21 +476,19 @@ function resetMicButton(correctSentence) {
 function scoreAnswer(userInput, correctSentence) {
   const userWords    = tokenize(userInput).map(normalize);
   const correctWords = tokenize(correctSentence).map(normalize);
+  const correctRaw   = tokenize(correctSentence);
   const wordResults  = [];
-  const maxLen = Math.max(userWords.length, correctWords.length);
 
-  for (let i = 0; i < maxLen; i++) {
+  // 正解文の語数だけを基準に比較（余分な認識語は無視）
+  for (let i = 0; i < correctWords.length; i++) {
     const u = userWords[i];
     const c = correctWords[i];
-
-    if (c === undefined) {
-      wordResults.push({ display: u, status: 'wrong' });
-    } else if (u === undefined) {
-      wordResults.push({ display: c, status: 'missing' });
+    if (u === undefined) {
+      wordResults.push({ display: correctRaw[i], status: 'missing' });
     } else if (u === c) {
-      wordResults.push({ display: tokenize(correctSentence)[i], status: 'correct' });
+      wordResults.push({ display: correctRaw[i], status: 'correct' });
     } else {
-      wordResults.push({ display: tokenize(correctSentence)[i], status: 'wrong' });
+      wordResults.push({ display: correctRaw[i], status: 'wrong' });
     }
   }
 
@@ -611,11 +611,7 @@ function renderPartB() {
         🎤 マイクで答える
       </button>
 
-      <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="認識結果が自動入力されます（または直接入力）"></textarea>
-
-      <button class="btn btn-check"
-        onclick="submitFromInput('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
+      <div class="recognized-text" id="recognized-text"></div>
 
       <div class="action-row" style="margin-top:8px;">
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
@@ -715,11 +711,7 @@ function renderPartC() {
         🎤 マイクで答える
       </button>
 
-      <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="認識結果が自動入力されます（または直接入力）"></textarea>
-
-      <button class="btn btn-check"
-        onclick="submitFromInput('${item.full.replace(/'/g, "\\'")}')">採点する</button>
+      <div class="recognized-text" id="recognized-text"></div>
 
       <div class="action-row" style="margin-top:8px;">
         <button class="btn btn-secondary" id="btn-hint" onclick="toggleHint()">チャンクヒント</button>

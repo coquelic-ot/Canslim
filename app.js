@@ -471,10 +471,45 @@ function resetMicButton(correctSentence) {
   btn.onclick = () => startListening(correct);
 }
 
+// ── IPA dictionary ───────────────────────────────────────────
+
+const IPA_DICT = {
+  // app vocabulary — tricky words
+  fabric:'/ˈfæbrɪk/', purchase:'/ˈpɜːrtʃəs/', purchasing:'/ˈpɜːrtʃəsɪŋ/',
+  corporate:'/ˈkɔːrpərɪt/', discount:'/ˈdɪskaʊnt/', bulk:'/bʌlk/',
+  interest:'/ˈɪntrəst/', considerably:'/kənˈsɪdərəbli/',
+  patient:'/ˈpeɪʃənt/', electricity:'/ɪˌlekˈtrɪsɪti/',
+  resources:'/rɪˈsɔːrsɪz/', literature:'/ˈlɪtrətʃər/',
+  subject:'/ˈsʌbdʒɪkt/', disappearing:'/dɪsəˈpɪərɪŋ/',
+  schedule:'/ˈʃedjuːl/', available:'/əˈveɪləbl/', booth:'/buːθ/',
+  spicy:'/ˈspaɪsi/', aware:'/əˈwɛr/', earthquakes:'/ˈɜːrθkweɪks/',
+  explain:'/ɪkˈspleɪn/', crowded:'/ˈkraʊdɪd/', careless:'/ˈkɛərləs/',
+  usually:'/ˈjuːʒuəli/', accident:'/ˈæksɪdənt/',
+  designated:'/ˈdezɪɡneɪtɪd/', festival:'/ˈfestɪvəl/',
+  european:'/ˌjʊərəˈpiːən/', products:'/ˈprɒdʌkts/',
+  taught:'/tɔːt/', content:'/ˈkɒntent/', confidence:'/ˈkɒnfɪdəns/',
+  admitted:'/ədˈmɪtɪd/', basis:'/ˈbeɪsɪs/',
+  exchange:'/ɪksˈtʃeɪndʒ/', homesick:'/ˈhoʊmsɪk/',
+  technology:'/tekˈnɒlədʒi/', quite:'/kwaɪt/',
+  cleaner:'/ˈkliːnər/', lowered:'/ˈloʊərd/',
+  fishing:'/ˈfɪʃɪŋ/', report:'/rɪˈpɔːrt/',
+  weather:'/ˈwɛðər/', disappear:'/dɪsəˈpɪər/',
+  area:'/ˈɛriə/', summer:'/ˈsʌmər/', children:'/ˈtʃɪldrən/',
+  // common words with tricky pronunciation
+  the:'/ðə/', of:'/əv/', with:'/wɪð/', this:'/ðɪs/', that:'/ðæt/',
+  there:'/ðɛr/', these:'/ðiːz/', those:'/ðoʊz/',
+  enough:'/ɪˈnʌf/', through:'/θruː/', thought:'/θɔːt/',
+  though:'/ðoʊ/', been:'/bɪn/', were:'/wɜːr/',
+  should:'/ʃʊd/', would:'/wʊd/', could:'/kʊd/',
+  hour:'/ˈaʊər/', your:'/jɔːr/', their:'/ðɛr/',
+  talked:'/tɔːkt/', bought:'/bɔːt/', brought:'/brɔːt/',
+};
+
 // ── Scoring ─────────────────────────────────────────────────
 
 function scoreAnswer(userInput, correctSentence) {
   const userWords    = tokenize(userInput).map(normalize);
+  const userRaw      = tokenize(userInput);
   const correctWords = tokenize(correctSentence).map(normalize);
   const correctRaw   = tokenize(correctSentence);
   const wordResults  = [];
@@ -484,11 +519,11 @@ function scoreAnswer(userInput, correctSentence) {
     const u = userWords[i];
     const c = correctWords[i];
     if (u === undefined) {
-      wordResults.push({ display: correctRaw[i], status: 'missing' });
+      wordResults.push({ display: correctRaw[i], heard: null, status: 'missing' });
     } else if (u === c) {
-      wordResults.push({ display: correctRaw[i], status: 'correct' });
+      wordResults.push({ display: correctRaw[i], heard: null, status: 'correct' });
     } else {
-      wordResults.push({ display: correctRaw[i], status: 'wrong' });
+      wordResults.push({ display: correctRaw[i], heard: userRaw[i], status: 'wrong' });
     }
   }
 
@@ -524,6 +559,33 @@ function renderResult(wordResults, pct) {
     summary.className = 'result-summary wrong';
     summary.textContent = `${pct}% 正解 — 答えを確認して練習しましょう`;
   }
+
+  // 発音比較：間違い・欠落語の「あなたの発音 vs 正しい発音」
+  const errorWords = wordResults.filter(w => w.status !== 'correct');
+  const pronRows = errorWords.map(w => {
+    const ipa = IPA_DICT[normalize(w.display)] || '';
+    const ipaSpan = ipa ? ` <span class="ipa">${ipa}</span>` : '';
+    if (w.status === 'missing') {
+      return `<div class="pron-row">
+        <span class="pron-label your">あなた:</span><span class="pron-val your-val">（言えなかった）</span>
+        <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaSpan}</span>
+      </div>`;
+    }
+    return `<div class="pron-row">
+      <span class="pron-label your">あなた:</span><span class="pron-val your-val">${w.heard || '?'}</span>
+      <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaSpan}</span>
+    </div>`;
+  }).join('');
+
+  let pronSection = document.getElementById('pron-compare');
+  if (!pronSection) {
+    pronSection = document.createElement('div');
+    pronSection.id = 'pron-compare';
+    pronSection.className = 'pron-compare';
+    const resultArea = document.getElementById('result-area');
+    resultArea.appendChild(pronSection);
+  }
+  pronSection.innerHTML = pronRows;
 
   document.getElementById('result-area').classList.add('visible');
 }

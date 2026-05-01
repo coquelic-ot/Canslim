@@ -421,6 +421,20 @@ body {
   margin-top: 10px;
 }
 
+.btn-skip {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  background: none;
+  border: none;
+  color: #9aa0ac;
+  font-size: 0.85rem;
+  text-align: center;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* ── Input ── */
 .dictation-textarea {
   width: 100%;

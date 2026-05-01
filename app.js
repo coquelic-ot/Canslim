@@ -340,8 +340,7 @@ function startListening(correctSentence) {
   if (btn) {
     btn.textContent = '🔴 録音中…';
     btn.classList.add('recording');
-    btn.disabled = false;
-    // onclickはstartListeningのまま（再タップで安全にリスタート）
+    btn.disabled = true; // iOS ダブルタッチによる即時 abort を防ぐ
   }
 
   // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
@@ -349,12 +348,10 @@ function startListening(correctSentence) {
     if (state.recognition === rec) {
       try { rec.abort(); } catch (_) {}
       state.recognition = null;
-      if (!state.transcript) {
-        resetMicButton(correctSentence);
-        showToast('録音がタイムアウトしました。もう一度お試しください');
-      }
+      resetMicButton(correctSentence);
+      showToast('もう一度マイクボタンを押してください');
     }
-  }, 15000);
+  }, 8000);
 
   rec.onresult = (event) => {
     clearTimeout(recTimeout);
@@ -590,6 +587,11 @@ function renderPartB() {
         onclick="${isLast ? 'showCompletedB()' : 'nextQuestionB()'}">
         ${isLast ? '結果を見る 🎉' : '次の問題へ →'}
       </button>
+
+      <button class="btn-skip" id="btn-skip"
+        onclick="${isLast ? 'showCompletedB()' : 'nextQuestionB()'}">
+        スキップして次へ →
+      </button>
     </div>
   `;
 
@@ -691,6 +693,11 @@ function renderPartC() {
       <button class="btn btn-next" id="btn-next" style="display:none"
         onclick="${isLast ? 'showCompletedC()' : 'nextQuestionC()'}">
         ${isLast ? '結果を見る 🎉' : '次の問題へ →'}
+      </button>
+
+      <button class="btn-skip" id="btn-skip"
+        onclick="${isLast ? 'showCompletedC()' : 'nextQuestionC()'}">
+        スキップして次へ →
       </button>
     </div>
   `;

@@ -333,15 +333,26 @@ function startListening(correctSentence) {
   rec.maxAlternatives = 1;
   state.recognition = rec;
 
+  // recTimeout をボタンの onclick から参照できるよう先に宣言
+  let recTimeout;
+
   const btn = document.getElementById('btn-mic');
   if (btn) {
-    btn.textContent = '🔴 録音中…';
+    btn.textContent = '🔴 録音中… (タップで停止)';
     btn.classList.add('recording');
-    btn.disabled = true;
+    btn.disabled = false; // 常に押せる状態を保つ（タップで録音中断）
+    btn.onclick = () => {
+      clearTimeout(recTimeout);
+      if (state.recognition === rec) {
+        try { state.recognition.abort(); } catch (_) {}
+        state.recognition = null;
+      }
+      resetMicButton(correctSentence);
+    };
   }
 
   // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
-  let recTimeout = setTimeout(() => {
+  recTimeout = setTimeout(() => {
     if (state.recognition === rec) {
       try { rec.abort(); } catch (_) {}
       state.recognition = null;

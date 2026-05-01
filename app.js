@@ -308,9 +308,14 @@ function startListening(correctSentence) {
   // Stop any TTS before recording
   window.speechSynthesis && window.speechSynthesis.cancel();
 
+  // 前の認識があればハンドラを外してからアボート（干渉を防ぐ）
   if (state.recognition) {
-    state.recognition.abort();
+    const oldRec = state.recognition;
     state.recognition = null;
+    oldRec.onresult = null;
+    oldRec.onerror = null;
+    oldRec.onend = null;
+    try { oldRec.abort(); } catch (_) {}
   }
 
   // やり直し時：前の認識テキスト・採点ボタン・結果・次へボタンをリセット
@@ -321,9 +326,7 @@ function startListening(correctSentence) {
   if (resultArea) resultArea.classList.remove('visible');
   const nextBtn = document.getElementById('btn-next');
   if (nextBtn) nextBtn.style.display = 'none';
-  // 前の採点分を results から取り除く（録音し直しは同じ問題の再挑戦）
   if (state.scored) { state.results.pop(); state.scored = false; }
-  // Clear any pronunciation feedback from previous attempt
   const pronFeedback = document.getElementById('pron-feedback');
   if (pronFeedback) pronFeedback.classList.remove('visible');
 
@@ -333,26 +336,16 @@ function startListening(correctSentence) {
   rec.maxAlternatives = 1;
   state.recognition = rec;
 
-  // recTimeout をボタンの onclick から参照できるよう先に宣言
-  let recTimeout;
-
   const btn = document.getElementById('btn-mic');
   if (btn) {
-    btn.textContent = '🔴 録音中… (タップで停止)';
+    btn.textContent = '🔴 録音中…';
     btn.classList.add('recording');
-    btn.disabled = false; // 常に押せる状態を保つ（タップで録音中断）
-    btn.onclick = () => {
-      clearTimeout(recTimeout);
-      if (state.recognition === rec) {
-        try { state.recognition.abort(); } catch (_) {}
-        state.recognition = null;
-      }
-      resetMicButton(correctSentence);
-    };
+    btn.disabled = false;
+    // onclickはstartListeningのまま（再タップで安全にリスタート）
   }
 
   // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
-  recTimeout = setTimeout(() => {
+  let recTimeout = setTimeout(() => {
     if (state.recognition === rec) {
       try { rec.abort(); } catch (_) {}
       state.recognition = null;

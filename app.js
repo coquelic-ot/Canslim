@@ -318,14 +318,16 @@ function startListening(correctSentence) {
     try { oldRec.abort(); } catch (_) {}
   }
 
-  // やり直し時：前の認識テキスト・採点ボタン・結果・次へボタンをリセット
+  // やり直し時：テキスト欄・結果・次へボタンをリセット
   state.transcript = null;
-  const recognized = document.getElementById('recognized-text');
-  if (recognized) { recognized.textContent = ''; recognized.classList.remove('visible'); }
+  const userInput = document.getElementById('user-input');
+  if (userInput) userInput.value = '';
   const resultArea = document.getElementById('result-area');
   if (resultArea) resultArea.classList.remove('visible');
   const nextBtn = document.getElementById('btn-next');
   if (nextBtn) nextBtn.style.display = 'none';
+  const skipBtn = document.getElementById('btn-skip');
+  if (skipBtn) skipBtn.style.display = '';
   if (state.scored) { state.results.pop(); state.scored = false; }
   const pronFeedback = document.getElementById('pron-feedback');
   if (pronFeedback) pronFeedback.classList.remove('visible');
@@ -396,12 +398,17 @@ function finishListening(transcript, correctSentence) {
   state.transcript = transcript;
   resetMicButton(correctSentence);
 
-  const recognized = document.getElementById('recognized-text');
-  if (recognized) {
-    recognized.textContent = '認識: ' + transcript;
-    recognized.classList.add('visible');
-  }
+  // テキスト欄にトランスクリプトを入れる（自動採点はしない）
+  const input = document.getElementById('user-input');
+  if (input) input.value = transcript;
+}
 
+function submitFromInput(correctSentence) {
+  const input = document.getElementById('user-input');
+  const text = (input ? input.value : '').trim();
+  if (!text) { showToast('マイクで答えるか、テキストを入力してください'); return; }
+  if (state.scored) { state.results.pop(); state.scored = false; }
+  state.transcript = text;
   submitAnswer(correctSentence);
 }
 
@@ -412,6 +419,8 @@ function submitAnswer(correctSentence) {
   renderResult(wordResults, pct);
 
   document.getElementById('btn-next').style.display = 'block';
+  const skipBtn = document.getElementById('btn-skip');
+  if (skipBtn) skipBtn.style.display = 'none';
   updateProgress();
 }
 
@@ -567,9 +576,13 @@ function renderPartB() {
         🎤 マイクで答える
       </button>
 
-      <div class="recognized-text" id="recognized-text"></div>
+      <textarea class="dictation-textarea" id="user-input" rows="2"
+        placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>
 
-      <div class="action-row" style="margin-top:12px;">
+      <button class="btn btn-check" id="btn-check"
+        onclick="submitFromInput('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
+
+      <div class="action-row" style="margin-top:8px;">
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>
       </div>
@@ -667,9 +680,13 @@ function renderPartC() {
         🎤 マイクで答える
       </button>
 
-      <div class="recognized-text" id="recognized-text"></div>
+      <textarea class="dictation-textarea" id="user-input" rows="2"
+        placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>
 
-      <div class="action-row" style="margin-top:12px;">
+      <button class="btn btn-check" id="btn-check"
+        onclick="submitFromInput('${item.full.replace(/'/g, "\\'")}')">採点する</button>
+
+      <div class="action-row" style="margin-top:8px;">
         <button class="btn btn-secondary" id="btn-hint" onclick="toggleHint()">チャンクヒント</button>
         <button class="btn btn-secondary" id="btn-reveal" onclick="toggleAnswer()">答えを見る</button>
         <button class="btn btn-secondary" id="btn-trans" onclick="toggleTranslation()">訳を見る</button>

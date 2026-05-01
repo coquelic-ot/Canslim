@@ -373,7 +373,9 @@ function startListening(correctSentence) {
     clearTimeout(recTimeout);
     state.recognition = null;
     resetMicButton(correctSentence);
-    if (event.error === 'not-allowed') {
+    if (event.error === 'aborted') {
+      // 意図的な中断なので何も表示しない
+    } else if (event.error === 'not-allowed') {
       showToast('マイクの使用を許可してください');
     } else if (event.error === 'no-speech') {
       showToast('音声が聞き取れませんでした。もう一度お試しください');

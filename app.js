@@ -13,13 +13,55 @@ const state = {
   scored: false,
   reviewMode: false,
   reviewData: [],
+  shuffledData: null,
 };
 
 // ── Helpers ─────────────────────────────────────────────────
 
 function currentData() {
   if (state.reviewMode) return state.reviewData;
+  if (state.shuffledData) return state.shuffledData;
   return state.mode === 'B' ? PART_B : PART_C;
+}
+
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function toggleShuffle() {
+  if (state.shuffledData) {
+    state.shuffledData = null;
+    showToast('元の順序に戻しました');
+  } else {
+    const data = state.mode === 'B' ? PART_B : PART_C;
+    state.shuffledData = shuffleArray(data);
+    showToast('ランダム順で練習します！');
+  }
+  state.currentIndex = 0;
+  state.results      = [];
+  state.transcript   = null;
+  state.scored       = false;
+  if (state.mode === 'B') renderPartB();
+  else renderPartC();
+}
+
+function restartModeShuffle(mode) {
+  const data = mode === 'B' ? PART_B : PART_C;
+  state.currentIndex = 0;
+  state.results      = [];
+  state.slowMode     = false;
+  state.transcript   = null;
+  state.scored       = false;
+  state.reviewMode   = false;
+  state.reviewData   = [];
+  state.shuffledData = shuffleArray(data);
+  if (mode === 'B') renderPartB();
+  else renderPartC();
 }
 
 function currentItem() {
@@ -505,6 +547,56 @@ const IPA_DICT = {
   talked:'/tɔːkt/', bought:'/bɔːt/', brought:'/brɔːt/',
 };
 
+// ── Phoneme diff hints ───────────────────────────────────────
+
+const VOWEL_DIFF_TIPS = {
+  'ɪ→iː': '/ɪ/（短い）より長い /iː/ に — 「イー」と伸ばして',
+  'iː→ɪ': '/iː/（長い）より短い /ɪ/ に — 短く弱く「イ」',
+  'æ→ɛ': '/æ/（「エア」）より /ɛ/（「エ」）に — 口を少し閉じて',
+  'ɛ→æ': '/ɛ/（「エ」）より /æ/（「エア」）に — 口を横に広げて',
+  'ʊ→uː': '短い /ʊ/ より長い /uː/ に — 唇を丸めて「ウー」と伸ばす',
+  'uː→ʊ': '長い /uː/ より短い /ʊ/ に — 短く「ウ」',
+  'ʌ→æ': '/ʌ/（弱い「ア」）より /æ/（「エア」）に — 口を横に広げて',
+  'æ→ʌ': '/æ/（「エア」）より /ʌ/（弱い「ア」）に — 口を緩めて',
+  'ɔː→ɑː': '丸い /ɔː/ より広い /ɑː/ に — 口を縦に大きく開けて「アー」',
+  'ɑː→ɔː': '広い /ɑː/ より丸い /ɔː/ に — 唇を丸めて「オー」',
+  'eɪ→ɛ': '二重母音 /eɪ/（「エイ」）より /ɛ/（「エ」）に — 伸ばさずに',
+  'ɛ→eɪ': '/ɛ/（「エ」）より /eɪ/ に — 「エイ」と二重母音で',
+  'oʊ→ɔː': '二重母音 /oʊ/（「オウ」）より /ɔː/（「オー」）に',
+  'ɔː→oʊ': '/ɔː/（「オー」）より /oʊ/ に — 「オウ」と二重母音で',
+  'ɑː→æ': '広い /ɑː/ より /æ/（「エア」）に — 口を横に広げて',
+  'æ→ɑː': '/æ/（「エア」）より広い /ɑː/ に — 口を縦に大きく開けて',
+  'ɜː→ɛ': '/ɜː/（「アー」）より /ɛ/（「エ」）に',
+  'ɛ→ɜː': '/ɛ/（「エ」）より /ɜː/ に — 口を丸めずに「アー」',
+  'aɪ→ɛ': '二重母音 /aɪ/（「アイ」）より /ɛ/（「エ」）に',
+  'ɛ→aɪ': '/ɛ/（「エ」）より /aɪ/ に — 「アイ」と二重母音で',
+};
+
+function extractVowels(ipa) {
+  if (!ipa) return [];
+  return ipa.match(/oʊ|eɪ|aɪ|aʊ|ɑː|iː|uː|ɔː|ɜː|æ|ɪ|ʊ|ɛ|ʌ|ə/g) || [];
+}
+
+function getPronDiffTip(heardWord, correctWord) {
+  if (!heardWord) return null;
+  const h = normalize(heardWord);
+  const c = normalize(correctWord);
+  if (h === c) return null;
+  const ipaH = IPA_DICT[h];
+  const ipaC = IPA_DICT[c];
+  if (!ipaH || !ipaC) return null;
+  const vowelsH = extractVowels(ipaH);
+  const vowelsC = extractVowels(ipaC);
+  for (let i = 0; i < Math.max(vowelsH.length, vowelsC.length); i++) {
+    const vh = vowelsH[i], vc = vowelsC[i];
+    if (vh && vc && vh !== vc) {
+      const tip = VOWEL_DIFF_TIPS[`${vh}→${vc}`];
+      if (tip) return tip;
+    }
+  }
+  return null;
+}
+
 // ── Scoring ─────────────────────────────────────────────────
 
 function scoreAnswer(userInput, correctSentence) {
@@ -563,18 +655,22 @@ function renderResult(wordResults, pct) {
   // 発音比較：間違い・欠落語の「あなたの発音 vs 正しい発音」
   const errorWords = wordResults.filter(w => w.status !== 'correct');
   const pronRows = errorWords.map(w => {
-    const ipa = IPA_DICT[normalize(w.display)] || '';
-    const ipaSpan = ipa ? ` <span class="ipa">${ipa}</span>` : '';
+    const ipaCorrect = IPA_DICT[normalize(w.display)] || '';
+    const ipaHeard   = w.heard ? (IPA_DICT[normalize(w.heard)] || '') : '';
+    const ipaCorrectSpan = ipaCorrect ? ` <span class="ipa">${ipaCorrect}</span>` : '';
+    const ipaHeardSpan   = ipaHeard   ? ` <span class="ipa">${ipaHeard}</span>`   : '';
+    const diffTip = w.heard ? getPronDiffTip(w.heard, w.display) : null;
+    const tipHtml = diffTip ? `<div class="pron-diff-tip">💡 ${diffTip}</div>` : '';
     if (w.status === 'missing') {
       return `<div class="pron-row">
         <span class="pron-label your">あなた:</span><span class="pron-val your-val">（言えなかった）</span>
-        <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaSpan}</span>
+        <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaCorrectSpan}</span>
       </div>`;
     }
     return `<div class="pron-row">
-      <span class="pron-label your">あなた:</span><span class="pron-val your-val">${w.heard || '?'}</span>
-      <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaSpan}</span>
-    </div>`;
+      <span class="pron-label your">あなた:</span><span class="pron-val your-val">${w.heard || '?'}${ipaHeardSpan}</span>
+      <span class="pron-label correct">正しい:</span><span class="pron-val correct-val">${w.display}${ipaCorrectSpan}</span>
+    </div>${tipHtml}`;
   }).join('');
 
   let pronSection = document.getElementById('pron-compare');
@@ -667,6 +763,9 @@ function renderPartB() {
         <button class="btn btn-slow ${state.slowMode ? 'active' : ''}" id="btn-slow" onclick="toggleSlow()">
           ${state.slowMode ? '🐢 スロー ON' : '🐢 スロー'}
         </button>
+        <button class="btn btn-shuffle ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()">
+          🔀 ${state.shuffledData ? 'ランダム ON' : 'ランダム'}
+        </button>
       </div>
 
       <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.sentence.replace(/'/g, "\\'")}')">
@@ -727,7 +826,8 @@ function showCompletedB() {
         ${pct === 100 ? '全問正解！素晴らしい！' : 'お疲れ様でした！'}
       </p>
       ${hasWrong ? `<button class="btn btn-next" style="margin-bottom:12px;width:100%;" onclick="startReview('B')">間違えた問題を復習する（${total - correct}問）</button>` : ''}
-      <button class="btn-restart" onclick="restartMode('B')">最初からやり直す</button>
+      <button class="btn btn-next" style="margin-bottom:12px;width:100%;background:#6c5ce7;" onclick="restartModeShuffle('B')">🔀 シャッフルしてやり直す</button>
+      <button class="btn-restart" onclick="restartMode('B')">元の順序でやり直す</button>
     </div>
   `;
 }
@@ -761,6 +861,9 @@ function renderPartC() {
         <button class="btn btn-play" onclick="speakCurrent()">▶ 全文再生</button>
         <button class="btn btn-slow ${state.slowMode ? 'active' : ''}" id="btn-slow" onclick="toggleSlow()">
           ${state.slowMode ? '🐢 スロー ON' : '🐢 スロー'}
+        </button>
+        <button class="btn btn-shuffle ${state.shuffledData ? 'active' : ''}" onclick="toggleShuffle()">
+          🔀 ${state.shuffledData ? 'ランダム ON' : 'ランダム'}
         </button>
       </div>
 
@@ -838,7 +941,8 @@ function showCompletedC() {
         ${pct === 100 ? '全問正解！素晴らしい！' : 'お疲れ様でした！'}
       </p>
       ${hasWrong ? `<button class="btn btn-next" style="margin-bottom:12px;width:100%;" onclick="startReview('C')">間違えた問題を復習する（${total - correct}問）</button>` : ''}
-      <button class="btn-restart" onclick="restartMode('C')">最初からやり直す</button>
+      <button class="btn btn-next" style="margin-bottom:12px;width:100%;background:#6c5ce7;" onclick="restartModeShuffle('C')">🔀 シャッフルしてやり直す</button>
+      <button class="btn-restart" onclick="restartMode('C')">元の順序でやり直す</button>
     </div>
   `;
 }
@@ -869,6 +973,7 @@ function restartMode(mode) {
   state.scored       = false;
   state.reviewMode   = false;
   state.reviewData   = [];
+  state.shuffledData = null;
   if (mode === 'B') renderPartB();
   else renderPartC();
 }
@@ -885,10 +990,11 @@ function switchTab(mode) {
     state.recognition.abort();
     state.recognition = null;
   }
-  state.transcript  = null;
-  state.scored      = false;
-  state.reviewMode  = false;
-  state.reviewData  = [];
+  state.transcript   = null;
+  state.scored       = false;
+  state.reviewMode   = false;
+  state.reviewData   = [];
+  state.shuffledData = null;
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);

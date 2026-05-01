@@ -374,10 +374,22 @@ function startListening(correctSentence) {
     resetMicButton(correctSentence);
   };
 
-  // マイク初期化を待ってから録音開始（最初の語が切れるのを防ぐ）
-  setTimeout(() => {
-    if (state.recognition !== rec) return; // すでに中断済み
-    if (btn) btn.textContent = '🔴 話してください!';
+  // Safari iOS はユーザー操作と同期で rec.start() を呼ぶ必要がある
+  try {
+    rec.start();
+    // 開始後に「話してください」カウントダウンを表示（最初の語の切れを防ぐ）
+    let count = 2;
+    if (btn) btn.textContent = `🔴 ${count}秒後に話して…`;
+    const cd = setInterval(() => {
+      count--;
+      if (!btn || state.recognition !== rec) { clearInterval(cd); return; }
+      if (count > 0) {
+        btn.textContent = `🔴 ${count}秒後に話して…`;
+      } else {
+        clearInterval(cd);
+        btn.textContent = '🔴 話してください!';
+      }
+    }, 1000);
     recTimeout = setTimeout(() => {
       if (state.recognition === rec) {
         try { rec.abort(); } catch (_) {}
@@ -385,16 +397,13 @@ function startListening(correctSentence) {
         resetMicButton(correctSentence);
         showToast('もう一度マイクボタンを押してください');
       }
-    }, 10000);
-    try {
-      rec.start();
-    } catch (e) {
-      clearTimeout(recTimeout);
-      state.recognition = null;
-      resetMicButton(correctSentence);
-      showToast('マイクの起動に失敗しました。もう一度お試しください');
-    }
-  }, 1200); // 1.2秒のウォームアップ
+    }, 12000);
+  } catch (e) {
+    clearTimeout(recTimeout);
+    state.recognition = null;
+    resetMicButton(correctSentence);
+    showToast('マイクの起動に失敗しました。もう一度お試しください');
+  }
 }
 
 function finishListening(transcript, correctSentence) {

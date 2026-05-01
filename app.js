@@ -595,15 +595,12 @@ function renderPartB() {
         </button>
       </div>
 
-      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.sentence.replace(/'/g, "\\'")}')">
-        🎤 マイクで答える
-      </button>
-      <button class="btn-stop-rec" id="btn-stop" style="display:none" onclick="stopListening()">⏹ 録音を止める</button>
+      <p class="dictation-hint">👆 下の欄をタップ → キーボードの 🎤 で話す → 採点する</p>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>
+        placeholder="ここをタップして話した内容を入力..."></textarea>
 
-      <button class="btn btn-check" id="btn-check"
+      <button class="btn btn-check"
         onclick="submitFromInput('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
 
       <div class="action-row" style="margin-top:8px;">
@@ -700,15 +697,12 @@ function renderPartC() {
         <div class="chunk-buttons">${chunkButtons}</div>
       </div>
 
-      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.full.replace(/'/g, "\\'")}')">
-        🎤 マイクで答える
-      </button>
-      <button class="btn-stop-rec" id="btn-stop" style="display:none" onclick="stopListening()">⏹ 録音を止める</button>
+      <p class="dictation-hint">👆 下の欄をタップ → キーボードの 🎤 で話す → 採点する</p>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="マイクで答えると自動入力されます。直接入力も可。"></textarea>
+        placeholder="ここをタップして話した内容を入力..."></textarea>
 
-      <button class="btn btn-check" id="btn-check"
+      <button class="btn btn-check"
         onclick="submitFromInput('${item.full.replace(/'/g, "\\'")}')">採点する</button>
 
       <div class="action-row" style="margin-top:8px;">

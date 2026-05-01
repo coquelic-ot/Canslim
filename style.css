@@ -401,6 +401,14 @@ body {
   border: 1.5px solid var(--warn);
 }
 
+.dictation-hint {
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-align: center;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+
 .btn-stop-rec {
   display: block;
   width: 100%;

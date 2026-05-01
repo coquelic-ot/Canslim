@@ -340,22 +340,12 @@ function startListening(correctSentence) {
 
   const btn = document.getElementById('btn-mic');
   if (btn) {
-    btn.textContent = '🔴 録音中…';
+    btn.textContent = '準備中…';
     btn.classList.add('recording');
-    btn.disabled = true; // iOS ダブルタッチによる即時 abort を防ぐ
+    btn.disabled = true;
   }
-  const stopBtn = document.getElementById('btn-stop');
-  if (stopBtn) stopBtn.style.display = 'block';
 
-  // Timeout fallback: Safari iOS で onend/onresult が発火しない場合にボタンを復帰させる
-  let recTimeout = setTimeout(() => {
-    if (state.recognition === rec) {
-      try { rec.abort(); } catch (_) {}
-      state.recognition = null;
-      resetMicButton(correctSentence);
-      showToast('もう一度マイクボタンを押してください');
-    }
-  }, 8000);
+  let recTimeout;
 
   rec.onresult = (event) => {
     clearTimeout(recTimeout);
@@ -378,21 +368,33 @@ function startListening(correctSentence) {
     }
   };
 
-  // onend では常にボタンをリセット（Safari iOS で onresult の後に onend が来ない場合の保険）
   rec.onend = () => {
     clearTimeout(recTimeout);
     state.recognition = null;
     resetMicButton(correctSentence);
   };
 
-  try {
-    rec.start();
-  } catch (e) {
-    clearTimeout(recTimeout);
-    state.recognition = null;
-    resetMicButton(correctSentence);
-    showToast('マイクの起動に失敗しました。もう一度お試しください');
-  }
+  // マイク初期化を待ってから録音開始（最初の語が切れるのを防ぐ）
+  setTimeout(() => {
+    if (state.recognition !== rec) return; // すでに中断済み
+    if (btn) btn.textContent = '🔴 話してください!';
+    recTimeout = setTimeout(() => {
+      if (state.recognition === rec) {
+        try { rec.abort(); } catch (_) {}
+        state.recognition = null;
+        resetMicButton(correctSentence);
+        showToast('もう一度マイクボタンを押してください');
+      }
+    }, 10000);
+    try {
+      rec.start();
+    } catch (e) {
+      clearTimeout(recTimeout);
+      state.recognition = null;
+      resetMicButton(correctSentence);
+      showToast('マイクの起動に失敗しました。もう一度お試しください');
+    }
+  }, 1200); // 1.2秒のウォームアップ
 }
 
 function finishListening(transcript, correctSentence) {
@@ -400,17 +402,18 @@ function finishListening(transcript, correctSentence) {
   state.transcript = transcript;
   resetMicButton(correctSentence);
 
-  // テキスト欄にトランスクリプトを入れる（自動採点はしない）
   const input = document.getElementById('user-input');
   if (input) input.value = transcript;
+
+  // 認識結果があれば自動採点
+  if (transcript) submitAnswer(correctSentence);
 }
 
 function submitFromInput(correctSentence) {
   const input = document.getElementById('user-input');
   const text = (input ? input.value : '').trim();
-  if (!text) { showToast('マイクで答えるか、テキストを入力してください'); return; }
   if (state.scored) { state.results.pop(); state.scored = false; }
-  state.transcript = text;
+  state.transcript = text || '';
   submitAnswer(correctSentence);
 }
 
@@ -595,10 +598,12 @@ function renderPartB() {
         </button>
       </div>
 
-      <p class="dictation-hint">👆 下の欄をタップ → キーボードの 🎤 で話す → 採点する</p>
+      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.sentence.replace(/'/g, "\\'")}')">
+        🎤 マイクで答える
+      </button>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="ここをタップして話した内容を入力..."></textarea>
+        placeholder="認識結果が自動入力されます（または直接入力）"></textarea>
 
       <button class="btn btn-check"
         onclick="submitFromInput('${item.sentence.replace(/'/g, "\\'")}')">採点する</button>
@@ -697,10 +702,12 @@ function renderPartC() {
         <div class="chunk-buttons">${chunkButtons}</div>
       </div>
 
-      <p class="dictation-hint">👆 下の欄をタップ → キーボードの 🎤 で話す → 採点する</p>
+      <button class="btn btn-mic" id="btn-mic" onclick="startListening('${item.full.replace(/'/g, "\\'")}')">
+        🎤 マイクで答える
+      </button>
 
       <textarea class="dictation-textarea" id="user-input" rows="2"
-        placeholder="ここをタップして話した内容を入力..."></textarea>
+        placeholder="認識結果が自動入力されます（または直接入力）"></textarea>
 
       <button class="btn btn-check"
         onclick="submitFromInput('${item.full.replace(/'/g, "\\'")}')">採点する</button>

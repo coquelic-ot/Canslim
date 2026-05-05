@@ -15,11 +15,11 @@ sleep 0.8
 
 # OS に応じてブラウザを開く
 if command -v xdg-open > /dev/null; then
-  xdg-open "http://localhost:$PORT"
+  xdg-open "http://localhost:$PORT/stock.html"
 elif command -v open > /dev/null; then
-  open "http://localhost:$PORT"
+  open "http://localhost:$PORT/stock.html"
 fi
 
-echo "サーバー起動中 → http://localhost:$PORT"
+echo "サーバー起動中 → http://localhost:$PORT/stock.html"
 echo "終了するには Ctrl+C を押してください"
 wait $SERVER_PID

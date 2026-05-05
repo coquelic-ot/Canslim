@@ -249,13 +249,47 @@ body {
 .slot-label { font-size: .72rem; font-weight: 600; color: var(--text-3); }
 
 .slot-upload {
-  padding: 20px 10px;
-  min-height: 110px;
+  padding: 12px 8px;
+  min-height: 80px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+
+.slot-ticker-area {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: .75rem;
+  color: var(--text);
+  resize: none;
+  font-family: var(--font);
+  line-height: 1.5;
+  transition: border-color .15s;
+  background: #fff;
+  margin-top: 4px;
+}
+.slot-ticker-area:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37,99,235,.12);
+}
+.slot-ticker-area::placeholder {
+  color: var(--text-3);
+  font-size: .7rem;
+}
+
+.import-hint {
+  text-align: center;
+  color: var(--text-3);
+  font-size: .8rem;
+  margin-top: 20px;
+  padding: 16px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
 }
 
 .slot-filled {

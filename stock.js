@@ -153,30 +153,50 @@ function scoreClass(v) {
 }
 
 // ── TESSERACT OCR ────────────────────────────────────────────
-// Tesseract は同時起動するとクラッシュするため、シングルワーカーで直列処理する
-let _tWorker   = null;
-let _tReady    = false;
-let _ocrChain  = Promise.resolve();
+// iOS Safari は Worker 内の canvas 操作を "insecure" として拒否する。
+// そのためメインスレッドで先に ImageData に変換してから Tesseract に渡す。
+let _tWorker  = null;
+let _tReady   = false;
+let _ocrChain = Promise.resolve();
 
 async function _initWorker() {
   if (_tReady) return;
   _tWorker = await Tesseract.createWorker('eng', 1, {
-    workerBlobURL: false,   // CDN ワーカーを使用
+    workerBlobURL: false,
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+    logger: () => {},
   });
   _tReady = true;
 }
 
+// DataURL → ImageData（メインスレッドで変換、Worker に渡せる形式）
+function dataURLtoImageData(dataURL) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      try {
+        resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      } catch(e) { reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataURL;
+  });
+}
+
 function runOcr(dataURL, onProgress) {
-  // 直前のOCRが終わってから次を開始（直列キュー）
   const task = _ocrChain.then(async () => {
     await _initWorker();
-    const { data: { text } } = await _tWorker.recognize(dataURL, {}, {
-      rectangle: undefined,
-    });
+    // ImageData に変換してから渡すことで Safari の "insecure" エラーを回避
+    const imageData = await dataURLtoImageData(dataURL);
+    const { data: { text } } = await _tWorker.recognize(imageData);
     if (onProgress) onProgress(100);
     return text;
   });
-  // エラーが次の処理をブロックしないようチェーンはエラーを握りつぶす
   _ocrChain = task.catch(() => {});
   return task;
 }

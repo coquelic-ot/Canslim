@@ -6,8 +6,7 @@
 const app = {
   apiKey:      localStorage.getItem('canslim-api-key') || '',
   marketTrend: localStorage.getItem('canslim-market')  || '',
-  top50Image:  null,
-  top50Mime:   null,
+  top50Slots:  [null, null, null, null], // {dataURL, stocks:[]} × 4
   stocks:      [],       // {rank, ticker, companyName, compositeRating, selected}
   analyses:    {},       // {[ticker]: analysisObj}
   history:     JSON.parse(localStorage.getItem('canslim-history') || '[]'),
@@ -274,22 +273,39 @@ function renderImport() {
     <div class="section">
       <div class="section-header">
         <h2>Step 1 — IBD Top 50 インポート</h2>
-        <p>IBD Top 50 またはスクリーナーのスクリーンショットをアップロードしてください</p>
+        <p>スクリーンショットを最大4枚アップロードできます（スクロールして複数ページ対応）</p>
       </div>
 
-      <div class="upload-zone" id="top50-zone">
-        <div class="upload-icon">📸</div>
-        <p class="upload-text">クリックまたはドラッグ＆ドロップ</p>
-        <p class="upload-hint">IBD Top 50 / スクリーナー スクリーンショット（PNG / JPG）</p>
-        <input type="file" id="top50-file" accept="image/*" class="file-input" />
+      <div class="slots-grid">
+        ${[0,1,2,3].map(i => {
+          const slot = app.top50Slots[i];
+          return `
+            <div class="slot-cell">
+              <div class="slot-label">スクショ ${i+1}</div>
+              ${slot ? `
+                <div class="slot-filled" id="slot-wrap-${i}">
+                  <img src="${slot.dataURL}" class="slot-thumb" />
+                  <div class="slot-info">
+                    ${slot.stocks?.length ? `<span class="slot-count">${slot.stocks.length}銘柄</span>` : ''}
+                    ${slot.processing    ? `<span class="slot-proc"><span class="spinner" style="width:12px;height:12px;border-width:2px;"></span></span>` : ''}
+                    ${slot.error        ? `<span class="slot-error">失敗</span>` : ''}
+                  </div>
+                  <label class="slot-reupload" title="差し替え">
+                    🔄
+                    <input type="file" accept="image/*" class="file-input slot-file" data-slot="${i}" />
+                  </label>
+                </div>
+              ` : `
+                <div class="upload-zone slot-upload" id="slot-zone-${i}">
+                  <div class="upload-icon" style="font-size:1.6rem;">📸</div>
+                  <p class="upload-text" style="font-size:.8rem;">タップして追加</p>
+                  <input type="file" accept="image/*" class="file-input slot-file" data-slot="${i}" />
+                </div>
+              `}
+            </div>
+          `;
+        }).join('')}
       </div>
-
-      ${app.top50Image ? `
-        <div class="preview-wrap" style="margin-top:12px;">
-          <img src="${app.top50Image}" class="image-preview" />
-          <div class="preview-label">アップロード済みスクリーンショット</div>
-        </div>
-      ` : ''}
 
       <div id="import-processing"></div>
 
@@ -324,20 +340,26 @@ function renderImport() {
     </div>
   `;
 
-  // Upload zone
-  const zone = document.getElementById('top50-zone');
-  const fileInput = document.getElementById('top50-file');
-
-  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
-  zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', async e => {
-    e.preventDefault(); zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) await handleTop50Upload(file);
+  // Bind slot file inputs
+  panel.querySelectorAll('.slot-file').forEach(input => {
+    input.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      const idx  = parseInt(e.target.dataset.slot);
+      if (file && !isNaN(idx)) await handleSlotUpload(file, idx);
+    });
   });
-  fileInput.addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (file) await handleTop50Upload(file);
+
+  // Drag & drop on empty slots
+  [0,1,2,3].forEach(i => {
+    const zone = document.getElementById(`slot-zone-${i}`);
+    if (!zone) return;
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', async e => {
+      e.preventDefault(); zone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) await handleSlotUpload(file, i);
+    });
   });
 
   if (hasStocks) {
@@ -365,7 +387,6 @@ function renderImport() {
       sel.forEach(s => {
         if (!app.analyses[s.ticker]) {
           app.analyses[s.ticker] = newAnalysis(s.ticker, s.companyName, s.rank);
-          // Pre-fill IBD ratings from Top50 OCR if available
           const a = app.analyses[s.ticker];
           if (s.compositeRating != null) a.compositeRating = s.compositeRating;
           if (s.epsRating != null)       a.epsRating        = s.epsRating;
@@ -379,23 +400,40 @@ function renderImport() {
   }
 }
 
-async function handleTop50Upload(file) {
-  const proc = document.getElementById('import-processing');
-  if (!proc) return;
-  proc.innerHTML = `<div class="processing-banner"><div class="spinner"></div>Claude Vision OCR 処理中…</div>`;
+async function handleSlotUpload(file, idx) {
+  // Show processing state immediately
+  app.top50Slots[idx] = { dataURL: null, stocks: [], processing: true, error: false };
+  const [base64, dataURL] = await Promise.all([fileToBase64(file), fileToDataURL(file)]);
+  app.top50Slots[idx].dataURL = dataURL;
+  renderImport();
 
   try {
-    const [base64, dataURL] = await Promise.all([fileToBase64(file), fileToDataURL(file)]);
-    app.top50Image = dataURL;
-    app.top50Mime  = file.type || 'image/jpeg';
-
-    const stocks = await ocrTop50(base64, app.top50Mime);
-    app.stocks = stocks.map(s => ({ ...s, selected: true }));
-    showToast(`${stocks.length}銘柄を読み込みました`);
+    const stocks = await ocrTop50(base64, file.type || 'image/jpeg');
+    app.top50Slots[idx] = { dataURL, stocks, processing: false, error: false };
+    mergeSlotStocks();
+    showToast(`スクショ${idx+1}: ${stocks.length}銘柄を読み込みました`);
   } catch(e) {
-    showToast('OCR失敗: ' + e.message, 'error');
+    app.top50Slots[idx] = { dataURL, stocks: [], processing: false, error: true };
+    showToast(`スクショ${idx+1} OCR失敗: ` + e.message, 'error');
   }
   renderImport();
+}
+
+function mergeSlotStocks() {
+  const seen = new Set();
+  const merged = [];
+  for (const slot of app.top50Slots) {
+    if (!slot?.stocks) continue;
+    for (const s of slot.stocks) {
+      if (!seen.has(s.ticker)) {
+        seen.add(s.ticker);
+        // Preserve selected state if already exists
+        const prev = app.stocks.find(x => x.ticker === s.ticker);
+        merged.push({ ...s, selected: prev ? prev.selected : true });
+      }
+    }
+  }
+  app.stocks = merged;
 }
 
 // ── RENDERING: ANALYZE TAB ───────────────────────────────────
@@ -923,6 +961,7 @@ function loadSession(idx) {
   app.stocks       = h.stocks;
   app.analyses     = h.analyses;
   app.marketTrend  = h.market || '';
+  app.top50Slots   = h.top50Slots || [null,null,null,null];
   updateMarketUI();
   renderImport();
   renderAnalyze();

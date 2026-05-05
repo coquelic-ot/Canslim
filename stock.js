@@ -4,7 +4,6 @@
 
 // ── STATE ───────────────────────────────────────────────────
 const app = {
-  apiKey:      localStorage.getItem('canslim-api-key') || '',
   marketTrend: localStorage.getItem('canslim-market')  || '',
   top50Slots:  [null, null, null, null], // {dataURL, stocks:[]} × 4
   stocks:      [],       // {rank, ticker, companyName, compositeRating, selected}
@@ -153,67 +152,86 @@ function scoreClass(v) {
   return 'fail';
 }
 
-// ── CLAUDE API ───────────────────────────────────────────────
-async function callClaude(base64, mimeType, prompt) {
-  if (!app.apiKey) throw new Error('APIキーが設定されていません。⚙から設定してください。');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': app.apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
-          { type: 'text',  text: prompt },
-        ]
-      }]
-    })
+// ── TESSERACT OCR ────────────────────────────────────────────
+async function runOcr(dataURL, onProgress) {
+  const { data: { text } } = await Tesseract.recognize(dataURL, 'eng', {
+    logger: m => {
+      if (onProgress && m.status === 'recognizing text') {
+        onProgress(Math.round(m.progress * 100));
+      }
+    }
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API error ${res.status}`);
+  return text;
+}
+
+async function ocrTop50(dataURL, onProgress) {
+  const text = await runOcr(dataURL, onProgress);
+  return parseTop50Text(text);
+}
+
+async function ocrStockPage(dataURL, ticker, onProgress) {
+  const text = await runOcr(dataURL, onProgress);
+  return parseStockPageText(text, ticker);
+}
+
+// IBD 50リスト解析: "26 CRS $432.16 ..." のような行からティッカーを抽出
+function parseTop50Text(raw) {
+  const stocks = [];
+  const seen   = new Set();
+  // 除外ワード（OCR誤検知しやすいヘッダー等）
+  const SKIP = new Set(['IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC']);
+
+  for (const line of raw.split('\n')) {
+    // パターン: 行頭に1〜3桁の数字、続いて2〜5文字の大文字ティッカー
+    const m = line.trim().match(/^#?\s*(\d{1,3})\s+([A-Z]{2,5})\b/);
+    if (!m) continue;
+    const rank   = parseInt(m[1]);
+    const ticker = m[2];
+    if (rank < 1 || rank > 100) continue;
+    if (SKIP.has(ticker) || seen.has(ticker)) continue;
+    seen.add(ticker);
+    stocks.push({ rank, ticker, companyName: '', compositeRating: null,
+                  epsRating: null, rsRating: null, smrRating: null, adRating: null });
   }
-  const data = await res.json();
-  return data.content[0].text;
+  return stocks.sort((a, b) => a.rank - b.rank);
 }
 
-const TOP50_PROMPT = `この画像はIBD (Investor's Business Daily) のTop 50またはスクリーナーリストです。
-表示されているすべての銘柄を抽出し、以下のJSON形式のみで返してください（説明文不要）:
-{"stocks":[{"rank":1,"ticker":"NVDA","companyName":"Nvidia Corp","compositeRating":99,"epsRating":99,"rsRating":97,"smrRating":"A","adRating":"A"}]}
-- tickerは大文字、ratingは数値またはnull、smrRating/adRatingはA-Eの文字またはnull`;
+// IBD個別銘柄ページ解析
+function parseStockPageText(raw, ticker) {
+  // 改行を空白に正規化して検索しやすくする
+  const t = raw.replace(/\r?\n/g, ' ').replace(/\s{2,}/g, ' ');
 
-function makeStockPrompt(ticker) {
-  return `この画像はIBDの${ticker}の銘柄分析ページです。
-表示されているすべての指標を抽出し、以下のJSON形式のみで返してください（説明文不要）:
-{"ticker":"${ticker}","compositeRating":null,"epsRating":null,"rsRating":null,"smrRating":null,"adRating":null,"qEpsGrowth":null,"annualEpsGrowth":null,"roe":null,"salesGrowth":null,"upDownVolRatio":null,"instOwnershipPct":null,"instCountChange":null,"floatShares":null}
-- qEpsGrowth: 直近四半期EPS成長率(%)、annualEpsGrowth: 年間EPS成長率(%)、roe: 自己資本利益率(%)
-- salesGrowth: 直近売上成長率(%)、upDownVolRatio: 出来高比率(数値)
-- instOwnershipPct: 機関投資家保有比率(%)、instCountChange: 機関投資家数の変化(正=増加/負=減少)
-- floatShares: 浮動株数(百万株)、各値はnullが許容`;
-}
+  function num(patterns) {
+    for (const p of patterns) {
+      const m = t.match(new RegExp(p + '[^\\d]*(\\d{1,3}(?:\\.\\d+)?)', 'i'));
+      if (m) return parseFloat(m[1]);
+    }
+    return null;
+  }
+  function letter(patterns) {
+    for (const p of patterns) {
+      const m = t.match(new RegExp(p + '[^A-Ea-e]*([A-E])', 'i'));
+      if (m) return m[1].toUpperCase();
+    }
+    return null;
+  }
 
-async function ocrTop50(base64, mimeType) {
-  const text = await callClaude(base64, mimeType, TOP50_PROMPT);
-  const json = extractJson(text);
-  return json.stocks || [];
-}
-
-async function ocrStockPage(base64, mimeType, ticker) {
-  const text = await callClaude(base64, mimeType, makeStockPrompt(ticker));
-  return extractJson(text);
-}
-
-function extractJson(text) {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('JSONの抽出に失敗しました');
-  return JSON.parse(m[0]);
+  return {
+    ticker,
+    compositeRating: num(['Composite\\s*Rating', 'Comp\\s*Rating']),
+    epsRating:       num(['EPS\\s*Rating']),
+    rsRating:        num(['RS\\s*Rating', 'Relative\\s*Strength\\s*Rating']),
+    smrRating:       letter(['SMR\\s*Rating', 'SMR']),
+    adRating:        letter(['A\\/D\\s*Rating', 'Acc\\.?\\s*Dis', 'A\\.D\\.']),
+    qEpsGrowth:      num(['EPS\\s*%\\s*Chg\\s*(?:Qtr|Lqtr)', 'Qtrly\\s*EPS\\s*Growth']),
+    annualEpsGrowth: num(['EPS\\s*Growth\\s*(?:3\\s*yr|Annual)', 'Annual\\s*EPS']),
+    roe:             num(['ROE', 'Return\\s*on\\s*Equity']),
+    salesGrowth:     num(['Sales\\s*%\\s*Chg', 'Revenue\\s*Growth', 'Sales\\s*Growth']),
+    upDownVolRatio:  num(['Up\\/Down\\s*Vol', 'U\\/D\\s*Vol']),
+    instOwnershipPct: num(['Inst\\s*Own(?:ership)?\\s*%?', '% Owned']),
+    instCountChange: null,
+    floatShares:     num(['Float\\s*(?:Shares)?\\s*(?:M|Mil)']),
+  };
 }
 
 // ── FILE HANDLING ────────────────────────────────────────────
@@ -401,14 +419,18 @@ function renderImport() {
 }
 
 async function handleSlotUpload(file, idx) {
-  // Show processing state immediately
-  app.top50Slots[idx] = { dataURL: null, stocks: [], processing: true, error: false };
-  const [base64, dataURL] = await Promise.all([fileToBase64(file), fileToDataURL(file)]);
-  app.top50Slots[idx].dataURL = dataURL;
+  const dataURL = await fileToDataURL(file);
+  app.top50Slots[idx] = { dataURL, stocks: [], processing: true, error: false };
   renderImport();
 
   try {
-    const stocks = await ocrTop50(base64, file.type || 'image/jpeg');
+    const stocks = await ocrTop50(dataURL, pct => {
+      const slot = app.top50Slots[idx];
+      if (slot) slot.progressPct = pct;
+      // Update spinner label without full re-render
+      const procEl = document.getElementById(`slot-proc-${idx}`);
+      if (procEl) procEl.textContent = `${pct}%`;
+    });
     app.top50Slots[idx] = { dataURL, stocks, processing: false, error: false };
     mergeSlotStocks();
     showToast(`スクショ${idx+1}: ${stocks.length}銘柄を読み込みました`);
@@ -703,8 +725,10 @@ function bindCardEvents(ticker) {
       const proc = document.getElementById(`proc-${ticker}`);
       if (proc) proc.innerHTML = `<div class="processing-banner"><div class="spinner"></div>IBDページ OCR中…</div>`;
       try {
-        const [base64, dataURL] = await Promise.all([fileToBase64(file), fileToDataURL(file)]);
-        const metrics = await ocrStockPage(base64, file.type || 'image/jpeg', ticker);
+        const dataURL = await fileToDataURL(file);
+        const metrics = await ocrStockPage(dataURL, ticker, pct => {
+          if (proc) proc.innerHTML = `<div class="processing-banner"><div class="spinner"></div>OCR ${pct}%…</div>`;
+        });
         mergeOcrMetrics(a, metrics);
         a.screenshotThumb = dataURL;
         showToast(`${ticker}: IBD指標を自動入力しました`);
@@ -1026,10 +1050,8 @@ function init() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Settings modal
+  // Settings modal (About)
   document.getElementById('settings-btn').addEventListener('click', () => {
-    document.getElementById('api-key-input').value = app.apiKey;
-    document.getElementById('api-status').textContent = '';
     document.getElementById('settings-modal').classList.remove('hidden');
   });
   document.getElementById('close-settings').addEventListener('click', () => {
@@ -1037,15 +1059,6 @@ function init() {
   });
   document.getElementById('settings-modal').addEventListener('click', e => {
     if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
-  });
-  document.getElementById('save-api-key').addEventListener('click', () => {
-    const key = document.getElementById('api-key-input').value.trim();
-    const status = document.getElementById('api-status');
-    if (!key) { status.className='api-status err'; status.textContent='APIキーを入力してください'; return; }
-    app.apiKey = key;
-    localStorage.setItem('canslim-api-key', key);
-    status.className='api-status ok'; status.textContent='✓ 保存しました';
-    setTimeout(() => document.getElementById('settings-modal').classList.add('hidden'), 800);
   });
 
   // Market modal

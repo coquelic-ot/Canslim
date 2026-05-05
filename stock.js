@@ -153,15 +153,32 @@ function scoreClass(v) {
 }
 
 // ── TESSERACT OCR ────────────────────────────────────────────
-async function runOcr(dataURL, onProgress) {
-  const { data: { text } } = await Tesseract.recognize(dataURL, 'eng', {
-    logger: m => {
-      if (onProgress && m.status === 'recognizing text') {
-        onProgress(Math.round(m.progress * 100));
-      }
-    }
+// Tesseract は同時起動するとクラッシュするため、シングルワーカーで直列処理する
+let _tWorker   = null;
+let _tReady    = false;
+let _ocrChain  = Promise.resolve();
+
+async function _initWorker() {
+  if (_tReady) return;
+  _tWorker = await Tesseract.createWorker('eng', 1, {
+    workerBlobURL: false,   // CDN ワーカーを使用
   });
-  return text;
+  _tReady = true;
+}
+
+function runOcr(dataURL, onProgress) {
+  // 直前のOCRが終わってから次を開始（直列キュー）
+  const task = _ocrChain.then(async () => {
+    await _initWorker();
+    const { data: { text } } = await _tWorker.recognize(dataURL, {}, {
+      rectangle: undefined,
+    });
+    if (onProgress) onProgress(100);
+    return text;
+  });
+  // エラーが次の処理をブロックしないようチェーンはエラーを握りつぶす
+  _ocrChain = task.catch(() => {});
+  return task;
 }
 
 async function ocrTop50(dataURL, onProgress) {
@@ -304,9 +321,14 @@ function renderImport() {
                 <div class="slot-filled" id="slot-wrap-${i}">
                   <img src="${slot.dataURL}" class="slot-thumb" />
                   <div class="slot-info">
-                    ${slot.stocks?.length ? `<span class="slot-count">${slot.stocks.length}銘柄</span>` : ''}
-                    ${slot.processing    ? `<span class="slot-proc"><span class="spinner" style="width:12px;height:12px;border-width:2px;"></span></span>` : ''}
-                    ${slot.error        ? `<span class="slot-error">失敗</span>` : ''}
+                    ${slot.processing
+                      ? `<span class="slot-proc"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span><span id="slot-proc-${i}" style="font-size:.68rem;color:#1d4ed8;margin-left:3px;">0%</span></span>`
+                      : slot.error
+                        ? `<span class="slot-error" title="${esc(slot.errorMsg||'')}">失敗 ⚠</span>`
+                        : slot.stocks?.length
+                          ? `<span class="slot-count">${slot.stocks.length}銘柄 ✓</span>`
+                          : `<span class="slot-error">0件</span>`
+                    }
                   </div>
                   <label class="slot-reupload" title="差し替え">
                     🔄
@@ -425,18 +447,19 @@ async function handleSlotUpload(file, idx) {
 
   try {
     const stocks = await ocrTop50(dataURL, pct => {
-      const slot = app.top50Slots[idx];
-      if (slot) slot.progressPct = pct;
-      // Update spinner label without full re-render
       const procEl = document.getElementById(`slot-proc-${idx}`);
       if (procEl) procEl.textContent = `${pct}%`;
     });
     app.top50Slots[idx] = { dataURL, stocks, processing: false, error: false };
     mergeSlotStocks();
-    showToast(`スクショ${idx+1}: ${stocks.length}銘柄を読み込みました`);
+    const n = stocks.length;
+    showToast(n > 0
+      ? `スクショ${idx+1}: ${n}銘柄を読み込みました`
+      : `スクショ${idx+1}: 銘柄を検出できませんでした（手動入力をご利用ください）`);
   } catch(e) {
-    app.top50Slots[idx] = { dataURL, stocks: [], processing: false, error: true };
-    showToast(`スクショ${idx+1} OCR失敗: ` + e.message, 'error');
+    const msg = e?.message || String(e);
+    app.top50Slots[idx] = { dataURL, stocks: [], processing: false, error: true, errorMsg: msg };
+    showToast(`スクショ${idx+1} OCR失敗: ${msg}`);
   }
   renderImport();
 }

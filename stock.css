@@ -237,6 +237,88 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Screenshot slots grid */
+.slots-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.slot-cell { display: flex; flex-direction: column; gap: 4px; }
+.slot-label { font-size: .72rem; font-weight: 600; color: var(--text-3); }
+
+.slot-upload {
+  padding: 20px 10px;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.slot-filled {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+  background: #f8fafc;
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slot-thumb {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  display: block;
+}
+.slot-info {
+  position: absolute;
+  bottom: 4px; left: 4px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.slot-count {
+  background: rgba(22,163,74,.85);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.slot-proc {
+  background: rgba(255,255,255,.85);
+  border-radius: 4px;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+}
+.slot-error {
+  background: rgba(220,38,38,.85);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.slot-reupload {
+  position: absolute;
+  top: 4px; right: 4px;
+  background: rgba(255,255,255,.9);
+  border-radius: 6px;
+  width: 28px; height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .9rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+
 /* Stock checklist */
 .stock-checklist {
   background: var(--card);

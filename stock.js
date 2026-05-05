@@ -152,135 +152,47 @@ function scoreClass(v) {
   return 'fail';
 }
 
-// ── TESSERACT OCR ────────────────────────────────────────────
-// iOS Safari は Worker 内の canvas 操作を "insecure" として拒否する。
-// そのためメインスレッドで先に ImageData に変換してから Tesseract に渡す。
-let _tWorker  = null;
-let _tReady   = false;
-let _ocrChain = Promise.resolve();
-
-async function _initWorker() {
-  if (_tReady) return;
-  _tWorker = await Tesseract.createWorker('eng', 1, {
-    workerBlobURL: false,
-    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-    logger: () => {},
-  });
-  _tReady = true;
-}
-
-// DataURL → ImageData（メインスレッドで変換、Worker に渡せる形式）
-function dataURLtoImageData(dataURL) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width  = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      try {
-        resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
-      } catch(e) { reject(e); }
-    };
-    img.onerror = reject;
-    img.src = dataURL;
-  });
-}
-
-function runOcr(dataURL, onProgress) {
-  const task = _ocrChain.then(async () => {
-    await _initWorker();
-    // ImageData に変換してから渡すことで Safari の "insecure" エラーを回避
-    const imageData = await dataURLtoImageData(dataURL);
-    const { data: { text } } = await _tWorker.recognize(imageData);
-    if (onProgress) onProgress(100);
-    return text;
-  });
-  _ocrChain = task.catch(() => {});
-  return task;
-}
-
-async function ocrTop50(dataURL, onProgress) {
-  const text = await runOcr(dataURL, onProgress);
-  return parseTop50Text(text);
-}
-
-async function ocrStockPage(dataURL, ticker, onProgress) {
-  const text = await runOcr(dataURL, onProgress);
-  return parseStockPageText(text, ticker);
-}
-
-// IBD 50リスト解析: "26 CRS $432.16 ..." のような行からティッカーを抽出
-function parseTop50Text(raw) {
+// ── TICKER PARSING ───────────────────────────────────────────
+// スクリーンショットを見ながら手動入力されたテキストからティッカーを抽出する
+function parseTickerText(text) {
+  const SKIP = new Set(['IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC','NEW','HIGH','LOW','BUY']);
   const stocks = [];
   const seen   = new Set();
-  // 除外ワード（OCR誤検知しやすいヘッダー等）
-  const SKIP = new Set(['IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC']);
+  let autoRank = 1;
 
-  for (const line of raw.split('\n')) {
-    // パターン: 行頭に1〜3桁の数字、続いて2〜5文字の大文字ティッカー
-    const m = line.trim().match(/^#?\s*(\d{1,3})\s+([A-Z]{2,5})\b/);
-    if (!m) continue;
-    const rank   = parseInt(m[1]);
-    const ticker = m[2];
-    if (rank < 1 || rank > 100) continue;
-    if (SKIP.has(ticker) || seen.has(ticker)) continue;
-    seen.add(ticker);
-    stocks.push({ rank, ticker, companyName: '', compositeRating: null,
-                  epsRating: null, rsRating: null, smrRating: null, adRating: null });
+  for (const line of text.split(/[\n\r]+/)) {
+    const trimmed = line.trim().toUpperCase();
+    if (!trimmed) continue;
+
+    // "1 NVDA" or "#3 AAPL" など: ランク付き形式
+    const rankMatch = trimmed.match(/^#?(\d{1,3})\s+([A-Z]{1,5})\b/);
+    if (rankMatch) {
+      const r = parseInt(rankMatch[1]);
+      const t = rankMatch[2];
+      if (r >= 1 && r <= 200 && !SKIP.has(t) && !seen.has(t) && /^[A-Z]{1,5}$/.test(t)) {
+        seen.add(t);
+        stocks.push({ rank: r, ticker: t, companyName: '', compositeRating: null,
+                      epsRating: null, rsRating: null, smrRating: null, adRating: null });
+      }
+      continue;
+    }
+
+    // ランクなし: カンマ・スペース区切り
+    for (const token of trimmed.split(/[,\s]+/)) {
+      const t = token.replace(/[^A-Z]/g, '');
+      if (!t || t.length < 1 || t.length > 5) continue;
+      if (SKIP.has(t) || seen.has(t)) continue;
+      if (!/^[A-Z]{1,5}$/.test(t)) continue;
+      seen.add(t);
+      stocks.push({ rank: autoRank++, ticker: t, companyName: '', compositeRating: null,
+                    epsRating: null, rsRating: null, smrRating: null, adRating: null });
+    }
   }
+
   return stocks.sort((a, b) => a.rank - b.rank);
 }
 
-// IBD個別銘柄ページ解析
-function parseStockPageText(raw, ticker) {
-  // 改行を空白に正規化して検索しやすくする
-  const t = raw.replace(/\r?\n/g, ' ').replace(/\s{2,}/g, ' ');
-
-  function num(patterns) {
-    for (const p of patterns) {
-      const m = t.match(new RegExp(p + '[^\\d]*(\\d{1,3}(?:\\.\\d+)?)', 'i'));
-      if (m) return parseFloat(m[1]);
-    }
-    return null;
-  }
-  function letter(patterns) {
-    for (const p of patterns) {
-      const m = t.match(new RegExp(p + '[^A-Ea-e]*([A-E])', 'i'));
-      if (m) return m[1].toUpperCase();
-    }
-    return null;
-  }
-
-  return {
-    ticker,
-    compositeRating: num(['Composite\\s*Rating', 'Comp\\s*Rating']),
-    epsRating:       num(['EPS\\s*Rating']),
-    rsRating:        num(['RS\\s*Rating', 'Relative\\s*Strength\\s*Rating']),
-    smrRating:       letter(['SMR\\s*Rating', 'SMR']),
-    adRating:        letter(['A\\/D\\s*Rating', 'Acc\\.?\\s*Dis', 'A\\.D\\.']),
-    qEpsGrowth:      num(['EPS\\s*%\\s*Chg\\s*(?:Qtr|Lqtr)', 'Qtrly\\s*EPS\\s*Growth']),
-    annualEpsGrowth: num(['EPS\\s*Growth\\s*(?:3\\s*yr|Annual)', 'Annual\\s*EPS']),
-    roe:             num(['ROE', 'Return\\s*on\\s*Equity']),
-    salesGrowth:     num(['Sales\\s*%\\s*Chg', 'Revenue\\s*Growth', 'Sales\\s*Growth']),
-    upDownVolRatio:  num(['Up\\/Down\\s*Vol', 'U\\/D\\s*Vol']),
-    instOwnershipPct: num(['Inst\\s*Own(?:ership)?\\s*%?', '% Owned']),
-    instCountChange: null,
-    floatShares:     num(['Float\\s*(?:Shares)?\\s*(?:M|Mil)']),
-  };
-}
-
 // ── FILE HANDLING ────────────────────────────────────────────
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = e => resolve(e.target.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -321,14 +233,12 @@ function newAnalysis(ticker, companyName='', rank=null) {
 // ── RENDERING: IMPORT TAB ────────────────────────────────────
 function renderImport() {
   const panel = document.getElementById('tab-import');
-  const hasStocks = app.stocks.length > 0;
-  const selCount  = app.stocks.filter(s => s.selected).length;
 
   panel.innerHTML = `
     <div class="section">
       <div class="section-header">
-        <h2>Step 1 — IBD Top 50 インポート</h2>
-        <p>スクリーンショットを最大4枚アップロードできます（スクロールして複数ページ対応）</p>
+        <h2>Step 1 — 銘柄リスト入力</h2>
+        <p>IBDアプリのスクショを参考に、ティッカーシンボルを入力してください（最大4スロット）</p>
       </div>
 
       <div class="slots-grid">
@@ -337,18 +247,13 @@ function renderImport() {
           return `
             <div class="slot-cell">
               <div class="slot-label">スクショ ${i+1}</div>
-              ${slot ? `
+              ${slot?.dataURL ? `
                 <div class="slot-filled" id="slot-wrap-${i}">
                   <img src="${slot.dataURL}" class="slot-thumb" />
                   <div class="slot-info">
-                    ${slot.processing
-                      ? `<span class="slot-proc"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span><span id="slot-proc-${i}" style="font-size:.68rem;color:#1d4ed8;margin-left:3px;">0%</span></span>`
-                      : slot.error
-                        ? `<span class="slot-error" title="${esc(slot.errorMsg||'')}">失敗 ⚠</span>`
-                        : slot.stocks?.length
-                          ? `<span class="slot-count">${slot.stocks.length}銘柄 ✓</span>`
-                          : `<span class="slot-error">0件</span>`
-                    }
+                    <span class="${slot.stocks?.length ? 'slot-count' : 'slot-error'}" id="slot-badge-${i}">
+                      ${slot.stocks?.length ? `${slot.stocks.length}銘柄 ✓` : '0件'}
+                    </span>
                   </div>
                   <label class="slot-reupload" title="差し替え">
                     🔄
@@ -357,50 +262,78 @@ function renderImport() {
                 </div>
               ` : `
                 <div class="upload-zone slot-upload" id="slot-zone-${i}">
-                  <div class="upload-icon" style="font-size:1.6rem;">📸</div>
-                  <p class="upload-text" style="font-size:.8rem;">タップして追加</p>
+                  <div class="upload-icon" style="font-size:1.4rem;">📸</div>
+                  <p class="upload-text" style="font-size:.75rem;">参考写真（任意）</p>
                   <input type="file" accept="image/*" class="file-input slot-file" data-slot="${i}" />
                 </div>
               `}
+              <textarea
+                class="slot-ticker-area"
+                data-slot="${i}"
+                placeholder="ティッカーを入力&#10;例: NVDA AAPL MSFT&#10;（スペース・カンマ・改行で区切り）"
+                rows="3"
+              >${esc(slot?.manualText || '')}</textarea>
             </div>
           `;
         }).join('')}
       </div>
 
-      <div id="import-processing"></div>
-
-      ${hasStocks ? `
-        <div class="stock-checklist" style="margin-top:16px;">
-          <div class="checklist-header">
-            <h3>銘柄リスト（${app.stocks.length}件）</h3>
-            <div class="checklist-controls">
-              <button class="btn btn-sm btn-ghost" id="sel-all">すべて選択</button>
-              <button class="btn btn-sm btn-ghost" id="sel-none">解除</button>
-            </div>
-          </div>
-          <div class="checklist-grid">
-            ${app.stocks.map(s => `
-              <label class="stock-item">
-                <input type="checkbox" data-ticker="${s.ticker}" ${s.selected ? 'checked' : ''} />
-                <span class="stock-rank">#${s.rank}</span>
-                <span class="stock-ticker">${esc(s.ticker)}</span>
-                <span class="stock-name">${esc(s.companyName)}</span>
-                ${s.compositeRating != null ? `<span class="stock-cr ${s.compositeRating>=90?'high':''}">${s.compositeRating}</span>` : ''}
-              </label>
-            `).join('')}
-          </div>
-          <div class="action-bar">
-            <span class="selected-count">${selCount}銘柄を選択中</span>
-            <button class="btn btn-primary" id="go-analyze" ${selCount===0?'disabled':''}>
-              分析へ進む →
-            </button>
-          </div>
-        </div>
-      ` : ''}
+      <div id="stock-list-container">
+        ${buildStockListHTML()}
+      </div>
     </div>
   `;
 
-  // Bind slot file inputs
+  bindImportEvents();
+}
+
+function buildStockListHTML() {
+  const hasStocks = app.stocks.length > 0;
+  const selCount  = app.stocks.filter(s => s.selected).length;
+  if (!hasStocks) {
+    return `<p class="import-hint">↑ 上のテキストボックスにティッカーを入力すると、ここにリストが表示されます</p>`;
+  }
+  return `
+    <div class="stock-checklist" style="margin-top:16px;">
+      <div class="checklist-header">
+        <h3>銘柄リスト（${app.stocks.length}件）</h3>
+        <div class="checklist-controls">
+          <button class="btn btn-sm btn-ghost" id="sel-all">すべて選択</button>
+          <button class="btn btn-sm btn-ghost" id="sel-none">解除</button>
+        </div>
+      </div>
+      <div class="checklist-grid">
+        ${app.stocks.map(s => `
+          <label class="stock-item">
+            <input type="checkbox" data-ticker="${esc(s.ticker)}" ${s.selected ? 'checked' : ''} />
+            <span class="stock-rank">#${s.rank}</span>
+            <span class="stock-ticker">${esc(s.ticker)}</span>
+            <span class="stock-name">${esc(s.companyName)}</span>
+          </label>
+        `).join('')}
+      </div>
+      <div class="action-bar">
+        <span class="selected-count">${selCount}銘柄を選択中</span>
+        <button class="btn btn-primary" id="go-analyze" ${selCount===0?'disabled':''}>
+          分析へ進む →
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function refreshStockList() {
+  const container = document.getElementById('stock-list-container');
+  if (container) {
+    container.innerHTML = buildStockListHTML();
+    bindChecklistEvents();
+  }
+}
+
+function bindImportEvents() {
+  const panel = document.getElementById('tab-import');
+
+  // Slot file inputs
   panel.querySelectorAll('.slot-file').forEach(input => {
     input.addEventListener('change', async e => {
       const file = e.target.files[0];
@@ -422,65 +355,73 @@ function renderImport() {
     });
   });
 
-  if (hasStocks) {
-    document.getElementById('sel-all').addEventListener('click', () => {
-      app.stocks.forEach(s => s.selected = true);
-      renderImport();
+  // Textarea ticker input — update stock list without re-rendering slots (preserves focus)
+  panel.querySelectorAll('.slot-ticker-area').forEach(textarea => {
+    textarea.addEventListener('input', e => {
+      const idx = parseInt(e.target.dataset.slot);
+      if (!app.top50Slots[idx]) {
+        app.top50Slots[idx] = { dataURL: null, stocks: [], manualText: '' };
+      }
+      const slot = app.top50Slots[idx];
+      slot.manualText = e.target.value;
+      slot.stocks = parseTickerText(e.target.value);
+      mergeSlotStocks();
+      const badgeEl = document.getElementById(`slot-badge-${idx}`);
+      if (badgeEl) {
+        const n = slot.stocks.length;
+        badgeEl.className = n > 0 ? 'slot-count' : 'slot-error';
+        badgeEl.textContent = n > 0 ? `${n}銘柄 ✓` : '0件';
+      }
+      refreshStockList();
     });
-    document.getElementById('sel-none').addEventListener('click', () => {
-      app.stocks.forEach(s => s.selected = false);
-      renderImport();
+  });
+
+  bindChecklistEvents();
+}
+
+function bindChecklistEvents() {
+  const panel = document.getElementById('tab-import');
+  if (!panel) return;
+
+  document.getElementById('sel-all')?.addEventListener('click', () => {
+    app.stocks.forEach(s => s.selected = true);
+    refreshStockList();
+  });
+  document.getElementById('sel-none')?.addEventListener('click', () => {
+    app.stocks.forEach(s => s.selected = false);
+    refreshStockList();
+  });
+  panel.querySelectorAll('.stock-item input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const s = app.stocks.find(x => x.ticker === e.target.dataset.ticker);
+      if (s) s.selected = e.target.checked;
+      const sc = app.stocks.filter(x => x.selected).length;
+      const countEl = panel.querySelector('.selected-count');
+      const goBtn   = document.getElementById('go-analyze');
+      if (countEl) countEl.textContent = `${sc}銘柄を選択中`;
+      if (goBtn)   goBtn.disabled = sc === 0;
     });
-    panel.querySelectorAll('.stock-item input[type="checkbox"]').forEach(cb => {
-      cb.addEventListener('change', e => {
-        const s = app.stocks.find(x => x.ticker === e.target.dataset.ticker);
-        if (s) s.selected = e.target.checked;
-        const sc = app.stocks.filter(x => x.selected).length;
-        const countEl = panel.querySelector('.selected-count');
-        const goBtn   = document.getElementById('go-analyze');
-        if (countEl) countEl.textContent = `${sc}銘柄を選択中`;
-        if (goBtn)   goBtn.disabled = sc === 0;
-      });
+  });
+  document.getElementById('go-analyze')?.addEventListener('click', () => {
+    const sel = app.stocks.filter(s => s.selected);
+    sel.forEach(s => {
+      if (!app.analyses[s.ticker]) {
+        app.analyses[s.ticker] = newAnalysis(s.ticker, s.companyName, s.rank);
+      }
     });
-    document.getElementById('go-analyze')?.addEventListener('click', () => {
-      const sel = app.stocks.filter(s => s.selected);
-      sel.forEach(s => {
-        if (!app.analyses[s.ticker]) {
-          app.analyses[s.ticker] = newAnalysis(s.ticker, s.companyName, s.rank);
-          const a = app.analyses[s.ticker];
-          if (s.compositeRating != null) a.compositeRating = s.compositeRating;
-          if (s.epsRating != null)       a.epsRating        = s.epsRating;
-          if (s.rsRating  != null)       a.rsRating         = s.rsRating;
-          if (s.smrRating != null)       a.smrRating        = s.smrRating;
-          if (s.adRating  != null)       a.adRating         = s.adRating;
-        }
-      });
-      switchTab('analyze');
-    });
-  }
+    switchTab('analyze');
+  });
 }
 
 async function handleSlotUpload(file, idx) {
   const dataURL = await fileToDataURL(file);
-  app.top50Slots[idx] = { dataURL, stocks: [], processing: true, error: false };
-  renderImport();
-
-  try {
-    const stocks = await ocrTop50(dataURL, pct => {
-      const procEl = document.getElementById(`slot-proc-${idx}`);
-      if (procEl) procEl.textContent = `${pct}%`;
-    });
-    app.top50Slots[idx] = { dataURL, stocks, processing: false, error: false };
-    mergeSlotStocks();
-    const n = stocks.length;
-    showToast(n > 0
-      ? `スクショ${idx+1}: ${n}銘柄を読み込みました`
-      : `スクショ${idx+1}: 銘柄を検出できませんでした（手動入力をご利用ください）`);
-  } catch(e) {
-    const msg = e?.message || String(e);
-    app.top50Slots[idx] = { dataURL, stocks: [], processing: false, error: true, errorMsg: msg };
-    showToast(`スクショ${idx+1} OCR失敗: ${msg}`);
-  }
+  const existingText = app.top50Slots[idx]?.manualText || '';
+  app.top50Slots[idx] = {
+    dataURL,
+    stocks: parseTickerText(existingText),
+    manualText: existingText,
+  };
+  mergeSlotStocks();
   renderImport();
 }
 
@@ -555,17 +496,16 @@ function renderStockCard(ticker) {
           ${a.screenshotThumb
             ? `<div class="card-upload-preview" id="upload-${ticker}">
                  <img src="${a.screenshotThumb}" style="height:32px;border-radius:4px;object-fit:contain;" />
-                 <span>IBD画面読み込み済 ✓</span>
+                 <span>スクリーンショット保存済 ✓</span>
                  <label style="cursor:pointer;color:#2563eb;font-size:.75rem;text-decoration:underline;">
                    再アップ<input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" style="display:none;" />
                  </label>
                </div>`
             : `<div class="card-upload" id="upload-${ticker}">
-                 📸 IBDの銘柄ページをアップ（自動入力）
+                 📸 IBDスクリーンショット（参考表示）
                  <input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" />
                </div>`
           }
-          <div class="upload-proc" id="proc-${ticker}"></div>
         </div>
 
         <!-- CAN SLIM Scores mini bar -->
@@ -760,25 +700,18 @@ function bindCardEvents(ticker) {
   const a = app.analyses[ticker];
   if (!a) return;
 
-  // IBD screenshot upload
+  // IBD screenshot upload — thumbnail reference only
   card.querySelectorAll('.ibd-file').forEach(input => {
     input.addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
-      const proc = document.getElementById(`proc-${ticker}`);
-      if (proc) proc.innerHTML = `<div class="processing-banner"><div class="spinner"></div>IBDページ OCR中…</div>`;
       try {
         const dataURL = await fileToDataURL(file);
-        const metrics = await ocrStockPage(dataURL, ticker, pct => {
-          if (proc) proc.innerHTML = `<div class="processing-banner"><div class="spinner"></div>OCR ${pct}%…</div>`;
-        });
-        mergeOcrMetrics(a, metrics);
         a.screenshotThumb = dataURL;
-        showToast(`${ticker}: IBD指標を自動入力しました`);
+        showToast(`${ticker}: スクリーンショットを保存しました`);
       } catch(ex) {
-        showToast('OCR失敗: ' + ex.message, 'error');
+        showToast('アップロード失敗: ' + ex.message, 'error');
       }
-      if (proc) proc.innerHTML = '';
       refreshCard(ticker);
     });
   });
@@ -860,22 +793,6 @@ function refreshCard(ticker) {
   bindCardEvents(ticker);
 }
 
-function mergeOcrMetrics(a, m) {
-  const map = {
-    compositeRating: 'compositeRating', epsRating: 'epsRating', rsRating: 'rsRating',
-    smrRating: 'smrRating', adRating: 'adRating',
-    qEpsGrowth: 'qEpsGrowth', annualEpsGrowth: 'annualEpsGrowth',
-    roe: 'roe', salesGrowth: 'salesGrowth',
-    upDownVolRatio: 'upDownVolRatio', floatShares: 'floatShares',
-    instOwnershipPct: 'instOwnership',
-  };
-  for (const [src, dst] of Object.entries(map)) {
-    if (m[src] != null) a[dst] = m[src];
-  }
-  if (m.instCountChange != null) {
-    a.instTrend = m.instCountChange > 0 ? 'increasing' : m.instCountChange < 0 ? 'decreasing' : 'stable';
-  }
-}
 
 // ── RENDERING: COMPARE TAB ───────────────────────────────────
 function renderCompare() {

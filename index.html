@@ -3,104 +3,65 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <meta name="theme-color" content="#1e3a5f" />
-  <title>CAN SLIM 銘柄チェッカー</title>
-  <link rel="stylesheet" href="stock.css" />
+  <meta name="theme-color" content="#1a2a4a" />
+  <title>Dictation Practice</title>
+  <link rel="stylesheet" href="style.css?v=21" />
 </head>
 <body>
 
-<header class="header">
-  <div class="header-inner">
-    <div class="header-brand">
-      <h1>CAN SLIM<span class="brand-sub"> 銘柄チェッカー</span></h1>
-      <p class="brand-caption">William O'Neil 式 銘柄選定ツール</p>
+  <header class="app-header">
+    <div class="header-top">
+      <h1>🎧 Dictation Practice</h1>
+      <button class="btn-settings" onclick="toggleSettings()" title="Azure設定">⚙</button>
     </div>
-    <div class="header-actions">
-      <button class="btn-market" id="market-btn">
-        <span id="market-indicator">📊</span>
-        <span id="market-label">市場設定</span>
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-mode="B" onclick="switchTab('B')">
+        Part B
       </button>
-      <button class="btn-icon" id="settings-btn" title="Claude API設定">⚙</button>
+      <button class="tab-btn" data-mode="C" onclick="switchTab('C')">
+        Part C
+      </button>
+    </nav>
+  </header>
+
+  <main class="main">
+    <div id="partb-panel" class="tab-panel active"></div>
+    <div id="partc-panel" class="tab-panel"></div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Settings overlay -->
+  <div class="settings-overlay" id="settings-overlay" onclick="handleOverlayClick(event)">
+    <div class="settings-panel">
+      <h2 style="font-size:1.1rem;font-weight:700;color:#1a2a4a;margin-bottom:4px;">Azure Speech 設定</h2>
+      <p style="font-size:0.82rem;color:#9aa0ac;margin-bottom:16px;">
+        発音スコア機能（フォネーム評価）を使うには Azure Speech Service のキーが必要です。<br>
+        無料枠: 5時間/月
+      </p>
+
+      <div class="settings-field">
+        <label for="azure-key-input">サブスクリプションキー</label>
+        <input type="password" id="azure-key-input" placeholder="例: a1b2c3d4e5f6..." autocomplete="off" />
+      </div>
+
+      <div class="settings-field">
+        <label for="azure-region-input">リージョン</label>
+        <input type="text" id="azure-region-input" placeholder="例: japaneast" autocomplete="off" />
+      </div>
+
+      <div class="azure-status" id="azure-status"></div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" onclick="saveAzureSettings()">保存</button>
+        <button class="btn btn-secondary" onclick="clearAzureSettings()">クリア</button>
+        <button class="btn btn-secondary" onclick="toggleSettings()">閉じる</button>
+      </div>
     </div>
   </div>
-  <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="import">📥 インポート</button>
-    <button class="tab-btn" data-tab="analyze">📊 分析</button>
-    <button class="tab-btn" data-tab="compare">⚖ 比較</button>
-    <button class="tab-btn" data-tab="history">📋 履歴</button>
-  </nav>
-</header>
 
-<main class="main">
-  <div id="tab-import"  class="tab-panel active"></div>
-  <div id="tab-analyze" class="tab-panel"></div>
-  <div id="tab-compare" class="tab-panel"></div>
-  <div id="tab-history" class="tab-panel"></div>
-</main>
-
-<!-- Settings Modal -->
-<div class="modal-overlay hidden" id="settings-modal">
-  <div class="modal modal-sm">
-    <h2>ℹ️ このアプリについて</h2>
-    <p class="modal-desc">
-      <strong>CAN SLIM 銘柄チェッカー</strong><br>
-      William O'Neil 式の7項目でスコアリングする銘柄選定ツールです。<br><br>
-      OCRには <strong>Tesseract.js</strong>（ブラウザ内処理・無料）を使用。<br>
-      APIキー・サーバー通信は不要です。
-    </p>
-    <div class="modal-actions">
-      <button class="btn btn-primary" id="close-settings">閉じる</button>
-    </div>
-  </div>
-</div>
-
-<!-- Market Direction Modal -->
-<div class="modal-overlay hidden" id="market-modal">
-  <div class="modal modal-sm">
-    <h2>市場トレンド（M）</h2>
-    <p class="modal-desc">全銘柄共通のスコアに反映されます。</p>
-    <div class="radio-group">
-      <label class="radio-card">
-        <input type="radio" name="market" value="bull" />
-        <span class="radio-icon">🟢</span>
-        <span class="radio-text">
-          <strong>強気相場</strong>
-          <small>上昇トレンド継続中</small>
-        </span>
-      </label>
-      <label class="radio-card">
-        <input type="radio" name="market" value="neutral" />
-        <span class="radio-icon">🟡</span>
-        <span class="radio-text">
-          <strong>中立・調整中</strong>
-          <small>方向感なし</small>
-        </span>
-      </label>
-      <label class="radio-card">
-        <input type="radio" name="market" value="bear" />
-        <span class="radio-icon">🔴</span>
-        <span class="radio-text">
-          <strong>弱気相場</strong>
-          <small>下降トレンド</small>
-        </span>
-      </label>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" id="save-market">設定</button>
-      <button class="btn btn-ghost" id="close-market">キャンセル</button>
-    </div>
-  </div>
-</div>
-
-<div class="toast hidden" id="toast"></div>
-
-<!-- Lightbox -->
-<div class="lightbox hidden" id="lightbox">
-  <div class="lightbox-bg" id="lightbox-bg"></div>
-  <img class="lightbox-img" id="lightbox-img" src="" alt="" />
-  <button class="lightbox-close" id="lightbox-close">✕</button>
-</div>
-
-<script src="stock.js?v=6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.35.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js" defer></script>
+  <script src="data.js?v=21"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

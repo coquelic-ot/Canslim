@@ -249,7 +249,7 @@ function renderImport() {
               <div class="slot-label">スクショ ${i+1}</div>
               ${slot?.dataURL ? `
                 <div class="slot-filled" id="slot-wrap-${i}">
-                  <img src="${slot.dataURL}" class="slot-thumb" />
+                  <img src="${slot.dataURL}" class="slot-thumb" data-slot-lightbox="${i}" title="タップで拡大" />
                   <div class="slot-info">
                     <span class="${slot.stocks?.length ? 'slot-count' : 'slot-error'}" id="slot-badge-${i}">
                       ${slot.stocks?.length ? `${slot.stocks.length}銘柄 ✓` : '0件'}
@@ -376,6 +376,15 @@ function bindImportEvents() {
     });
   });
 
+  // Slot image lightbox (tap to view full screenshot)
+  panel.querySelectorAll('[data-slot-lightbox]').forEach(img => {
+    img.addEventListener('click', () => {
+      const idx = parseInt(img.dataset.slotLightbox);
+      const url = app.top50Slots[idx]?.dataURL;
+      if (url) showLightbox(url);
+    });
+  });
+
   bindChecklistEvents();
 }
 
@@ -485,27 +494,34 @@ function renderStockCard(ticker) {
         ${a.ibdRank != null ? `<span class="stock-card-rank">#${a.ibdRank}</span>` : ''}
         <span class="stock-card-ticker">${esc(ticker)}</span>
         <span class="stock-card-name">${esc(a.companyName)}</span>
+        <button class="btn-fetch" data-fetch="${esc(ticker)}" title="Yahoo Financeから財務データを自動取得">📊 Yahoo取得</button>
         <div class="total-badge ${scoreClass(scores.total)}" id="badge-${ticker}">
           ${scores.total != null ? scores.total : '-'}
         </div>
       </div>
 
       <div class="stock-card-body">
-        <!-- IBD Screenshot Upload -->
-        <div>
+        <!-- データ自動入力 -->
+        <div class="autofill-section">
           ${a.screenshotThumb
             ? `<div class="card-upload-preview" id="upload-${ticker}">
-                 <img src="${a.screenshotThumb}" style="height:32px;border-radius:4px;object-fit:contain;" />
+                 <img src="${a.screenshotThumb}" class="card-ss-thumb" data-card-lightbox="1" title="タップで拡大" />
                  <span>スクリーンショット保存済 ✓</span>
                  <label style="cursor:pointer;color:#2563eb;font-size:.75rem;text-decoration:underline;">
                    再アップ<input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" style="display:none;" />
                  </label>
                </div>`
             : `<div class="card-upload" id="upload-${ticker}">
-                 📸 IBDスクリーンショット（参考表示）
+                 📸 IBDスクリーンショット（任意）
                  <input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" />
                </div>`
           }
+          <details class="ocr-paste-box">
+            <summary class="ocr-paste-summary">📋 IBDテキスト貼り付けで自動入力</summary>
+            <p class="ocr-paste-guide">スマホ: IBDアプリのスクショを長押し →「テキストをコピー」(iOS Live Text / Google Lens)<br>PC: IBDページのテキストを選択コピー</p>
+            <textarea class="ocr-paste-area" placeholder="EPS Rating: 95&#10;RS Rating: 91&#10;SMR Rating: A&#10;A/D Rating: B&#10;Composite Rating: 97"></textarea>
+            <button class="btn btn-sm btn-primary" data-parse-ocr="${esc(ticker)}">解析して自動入力</button>
+          </details>
         </div>
 
         <!-- CAN SLIM Scores mini bar -->
@@ -700,7 +716,7 @@ function bindCardEvents(ticker) {
   const a = app.analyses[ticker];
   if (!a) return;
 
-  // IBD screenshot upload — thumbnail reference only
+  // IBD screenshot upload
   card.querySelectorAll('.ibd-file').forEach(input => {
     input.addEventListener('change', async e => {
       const file = e.target.files[0];
@@ -708,12 +724,47 @@ function bindCardEvents(ticker) {
       try {
         const dataURL = await fileToDataURL(file);
         a.screenshotThumb = dataURL;
+        refreshCard(ticker);
         showToast(`${ticker}: スクリーンショットを保存しました`);
       } catch(ex) {
         showToast('アップロード失敗: ' + ex.message, 'error');
       }
-      refreshCard(ticker);
     });
+  });
+
+  // Yahoo Finance auto-fetch
+  card.querySelector('[data-fetch]')?.addEventListener('click', async () => {
+    const btn = card.querySelector('[data-fetch]');
+    if (!btn) return;
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳…';
+    try {
+      const data = await fetchYahooData(ticker);
+      const filled = applyFetchedData(ticker, data);
+      refreshCard(ticker);
+      showToast(filled > 0 ? `${ticker}: ${filled}項目を取得しました` : `${ticker}: データが見つかりませんでした`);
+    } catch (e) {
+      showToast(`${ticker}: 取得失敗 — ${e.message}`, 'error');
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  });
+
+  // OCR text paste → parse IBD ratings
+  card.querySelector('[data-parse-ocr]')?.addEventListener('click', () => {
+    const area = card.querySelector('.ocr-paste-area');
+    const text = area?.value || '';
+    if (!text.trim()) { showToast('テキストを貼り付けてください'); return; }
+    const filled = applyOcrText(ticker, text);
+    refreshCard(ticker);
+    showToast(filled > 0 ? `${ticker}: ${filled}項目を自動入力しました` : `${ticker}: レーティングが検出されませんでした`);
+  });
+
+  // Screenshot lightbox
+  card.querySelector('[data-card-lightbox]')?.addEventListener('click', () => {
+    const url = app.analyses[ticker]?.screenshotThumb;
+    if (url) showLightbox(url);
   });
 
   // Numeric / text inputs
@@ -1003,6 +1054,115 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
 }
 
+// ── LIGHTBOX ─────────────────────────────────────────────────
+function showLightbox(url) {
+  document.getElementById('lightbox-img').src = url;
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+function hideLightbox() {
+  document.getElementById('lightbox').classList.add('hidden');
+  document.getElementById('lightbox-img').src = '';
+}
+
+// ── OCR + DATA FETCH ─────────────────────────────────────────
+
+// IBD個別ページのOCRテキストからレーティングを抽出
+function parseStockPageText(text) {
+  const result = {};
+  // EPS Rating (1-99)
+  let m = text.match(/EPS\s+RATING[^\d]*(\d{1,2})/i);
+  if (m) result.epsRating = Math.min(99, Math.max(1, parseInt(m[1])));
+  // RS Rating
+  m = text.match(/RS\s+RATING[^\d]*(\d{1,2})/i);
+  if (!m) m = text.match(/RELATIVE\s+STRENGTH[^\d]*(\d{1,2})/i);
+  if (m) result.rsRating = Math.min(99, Math.max(1, parseInt(m[1])));
+  // Composite Rating
+  m = text.match(/COMPOSITE\s+RATING[^\d]*(\d{1,3})/i);
+  if (m) result.compositeRating = Math.min(99, parseInt(m[1]));
+  // SMR Rating (letter grade A-E)
+  m = text.match(/SMR\s+RATING[^A-Ea-e]*([A-Ea-e])/i);
+  if (m) result.smrRating = m[1].toUpperCase();
+  // A/D (Accumulation/Distribution) Rating
+  m = text.match(/(?:ACC(?:UMULATION)?[/\s]+DIS(?:TRIBUTION)?|A\/D)\s+RATING[^A-Ea-e]*([A-Ea-e])/i);
+  if (!m) m = text.match(/A\/D\s*[:\-]\s*([A-Ea-e])/i);
+  if (m) result.adRating = m[1].toUpperCase();
+  return result;
+}
+
+function applyOcrText(ticker, text) {
+  const parsed = parseStockPageText(text);
+  const a = app.analyses[ticker];
+  if (!a) return 0;
+  let filled = 0;
+  for (const [k, v] of Object.entries(parsed)) {
+    if (v != null) { a[k] = v; filled++; }
+  }
+  return filled;
+}
+
+// Tesseract.js を使ったOCR（画像→テキスト→レーティング抽出）
+async function runOcrOnCard(ticker, dataURL) {
+  if (typeof Tesseract === 'undefined') {
+    showToast(`${ticker}: Tesseract.jsが読み込まれていません`, 'error');
+    return;
+  }
+  showToast(`${ticker}: OCR解析中...（数秒かかります）`);
+  try {
+    const worker = await Tesseract.createWorker('eng');
+    const { data: { text } } = await worker.recognize(dataURL);
+    await worker.terminate();
+    const filled = applyOcrText(ticker, text);
+    refreshCard(ticker);
+    showToast(filled > 0
+      ? `${ticker}: OCRで${filled}項目を自動入力しました`
+      : `${ticker}: レーティングが検出されませんでした（手動で貼り付けもお試しください）`
+    );
+  } catch (e) {
+    showToast(`${ticker}: OCR失敗 — ${e.message}`, 'error');
+  }
+}
+
+// Yahoo Finance から財務データを自動取得（corsproxy.io 経由）
+async function fetchYahooData(ticker) {
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail';
+  const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}`;
+  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(yahooUrl)}`;
+
+  const resp = await fetch(proxyUrl);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const json = await resp.json();
+  const r = json.quoteSummary?.result?.[0];
+  if (!r) throw new Error('データが取得できませんでした');
+
+  const fd = r.financialData       || {};
+  const ks = r.defaultKeyStatistics || {};
+  const sd = r.summaryDetail        || {};
+  const data = {};
+
+  if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw  * 100);
+  if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw   * 100);
+  if (fd.returnOnEquity?.raw != null) data.roe          = Math.round(fd.returnOnEquity.raw  * 100);
+  if (ks.floatShares?.raw    != null) data.floatShares  = Math.round(ks.floatShares.raw / 1e6);
+
+  const price  = fd.currentPrice?.raw;
+  const high52 = sd.fiftyTwoWeekHigh?.raw;
+  if (price && high52 && high52 > 0) {
+    data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
+  }
+
+  return data;
+}
+
+function applyFetchedData(ticker, data) {
+  const a = app.analyses[ticker];
+  if (!a) return 0;
+  let filled = 0;
+  for (const [k, v] of Object.entries(data)) {
+    if (v != null) { a[k] = v; filled++; }
+  }
+  return filled;
+}
+
 // ── INIT ─────────────────────────────────────────────────────
 function init() {
   // Tab navigation
@@ -1045,6 +1205,11 @@ function init() {
     renderCompare();
     showToast('市場トレンドを設定しました');
   });
+
+  // Lightbox
+  document.getElementById('lightbox-bg').addEventListener('click', hideLightbox);
+  document.getElementById('lightbox-close').addEventListener('click', hideLightbox);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideLightbox(); });
 
   updateMarketUI();
   renderImport();

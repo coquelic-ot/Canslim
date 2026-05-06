@@ -465,10 +465,12 @@ function bindChecklistEvents() {
   document.getElementById('sel-all')?.addEventListener('click', () => {
     app.stocks.forEach(s => s.selected = true);
     refreshStockList();
+    scheduleSave();
   });
   document.getElementById('sel-none')?.addEventListener('click', () => {
     app.stocks.forEach(s => s.selected = false);
     refreshStockList();
+    scheduleSave();
   });
   panel.querySelectorAll('.stock-item input[type="checkbox"]').forEach(cb => {
     cb.addEventListener('change', e => {
@@ -479,6 +481,7 @@ function bindChecklistEvents() {
       const goBtn   = document.getElementById('go-analyze');
       if (countEl) countEl.textContent = `${sc}銘柄を選択中`;
       if (goBtn)   goBtn.disabled = sc === 0;
+      scheduleSave();
     });
   });
   document.getElementById('go-analyze')?.addEventListener('click', () => {
@@ -545,13 +548,13 @@ function mergeSlotStocks() {
     for (const s of slot.stocks) {
       if (!seen.has(s.ticker)) {
         seen.add(s.ticker);
-        // Preserve selected state if already exists
         const prev = app.stocks.find(x => x.ticker === s.ticker);
         merged.push({ ...s, selected: prev ? prev.selected : true });
       }
     }
   }
   app.stocks = merged;
+  scheduleSave();
 }
 
 // ── RENDERING: ANALYZE TAB ───────────────────────────────────
@@ -914,6 +917,7 @@ function updateField(ticker, e) {
     a[field] = val || null;
   }
   updateScoreDisplay(ticker);
+  scheduleSave();
 }
 
 function updateScoreDisplay(ticker) {
@@ -1117,6 +1121,42 @@ function saveHistory() {
   localStorage.setItem('canslim-history', JSON.stringify(app.history));
 }
 
+// ── WORKING SESSION AUTO-SAVE ────────────────────────────────
+let _saveTimer = null;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(saveWorkingSession, 1500);
+}
+
+function saveWorkingSession() {
+  try {
+    const analysesClean = {};
+    for (const [t, a] of Object.entries(app.analyses)) {
+      analysesClean[t] = { ...a, screenshotThumb: null };
+    }
+    localStorage.setItem('canslim-working', JSON.stringify({
+      stocks:    app.stocks,
+      slotTexts: app.top50Slots.map(s => s?.manualText || ''),
+      analyses:  analysesClean,
+    }));
+  } catch (e) { /* quota exceeded — skip */ }
+}
+
+function loadWorkingSession() {
+  try {
+    const raw = localStorage.getItem('canslim-working');
+    if (!raw) return false;
+    const h = JSON.parse(raw);
+    if (!h.stocks?.length) return false;
+    app.stocks = h.stocks;
+    (h.slotTexts || []).forEach((text, i) => {
+      if (text) app.top50Slots[i] = { dataURL: null, stocks: parseTickerText(text), manualText: text };
+    });
+    app.analyses = h.analyses || {};
+    return true;
+  } catch (e) { return false; }
+}
+
 // ── TAB SWITCHING ────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -1210,6 +1250,7 @@ function applyOcrText(ticker, text) {
   for (const [k, v] of Object.entries(parsed)) {
     if (v != null) { a[k] = v; filled++; }
   }
+  if (filled) scheduleSave();
   return filled;
 }
 
@@ -1376,6 +1417,7 @@ function applyFetchedData(ticker, data) {
       }
     }
   }
+  if (filled) scheduleSave();
   return filled;
 }
 
@@ -1517,7 +1559,16 @@ function init() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideLightbox(); });
 
   updateMarketUI();
-  renderImport();
+
+  // 前回のワーキングセッションを復元
+  if (loadWorkingSession()) {
+    renderImport();
+    renderAnalyze();
+    renderCompare();
+    showToast('前回のリストを復元しました');
+  } else {
+    renderImport();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

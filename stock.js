@@ -5,10 +5,11 @@
 // ── STATE ───────────────────────────────────────────────────
 const app = {
   marketTrend: localStorage.getItem('canslim-market')  || '',
-  top50Slots:  [null, null, null, null], // {dataURL, stocks:[]} × 4
-  stocks:      [],       // {rank, ticker, companyName, compositeRating, selected}
-  analyses:    {},       // {[ticker]: analysisObj}
+  top50Slots:  [null, null, null, null],
+  stocks:      [],
+  analyses:    {},
   history:     JSON.parse(localStorage.getItem('canslim-history') || '[]'),
+  holdings:    new Set(JSON.parse(localStorage.getItem('canslim-holdings') || '[]')),
 };
 
 const CRITERIA = ['C','A','N','S','L','I','M'];
@@ -215,7 +216,7 @@ function fileToDataURL(file) {
 // ── DEFAULT ANALYSIS OBJECT ──────────────────────────────────
 function newAnalysis(ticker, companyName='', rank=null) {
   return {
-    ticker, companyName, ibdRank: rank,
+    ticker, companyName, businessDesc: null, ibdRank: rank,
     // IBD Ratings
     compositeRating: null, epsRating: null, rsRating: null,
     smrRating: null, adRating: null,
@@ -291,6 +292,28 @@ function renderImport() {
       <div id="stock-list-container">
         ${buildStockListHTML()}
       </div>
+
+      <!-- Moomoo保有銘柄 -->
+      <div class="holdings-section">
+        <div class="holdings-header" id="holdings-toggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1rem;">▶</span>
+          <h3 style="margin:0;font-size:.9rem;">📂 保有銘柄インポート（Moomoo）</h3>
+          ${app.holdings.size > 0 ? `<span class="holdings-count">${app.holdings.size}銘柄</span>` : ''}
+        </div>
+        <div class="holdings-body" id="holdings-body" style="display:none;">
+          <p class="setting-hint">MoomooのポートフォリオページをGoogle Lens / Live Textでコピーして貼り付け。ティッカーを自動抽出します。</p>
+          <textarea id="holdings-paste" class="slot-ticker-area" rows="4" placeholder="例:&#10;STRL 1.4 885.00&#10;TSM 5 381.28&#10;NVDA 10 207.07"></textarea>
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="parse-holdings-btn">解析して保存</button>
+            <button class="btn btn-sm btn-ghost" id="clear-holdings-btn">クリア</button>
+            <span id="holdings-status" style="font-size:.75rem;color:var(--text-2);"></span>
+          </div>
+          ${app.holdings.size > 0 ? `
+            <div class="holdings-tags">
+              ${[...app.holdings].sort().map(t => `<span class="holding-tag">${esc(t)}</span>`).join('')}
+            </div>` : ''}
+        </div>
+      </div>
     </div>
   `;
 
@@ -314,10 +337,11 @@ function buildStockListHTML() {
       </div>
       <div class="checklist-grid">
         ${app.stocks.map(s => `
-          <label class="stock-item">
+          <label class="stock-item ${app.holdings.has(s.ticker) ? 'stock-item-holding' : ''}">
             <input type="checkbox" data-ticker="${esc(s.ticker)}" ${s.selected ? 'checked' : ''} />
             <span class="stock-rank">#${s.rank}</span>
             <span class="stock-ticker">${esc(s.ticker)}</span>
+            ${app.holdings.has(s.ticker) ? '<span class="badge-holding">保有中</span>' : ''}
             <span class="stock-name">${esc(s.companyName)}</span>
           </label>
         `).join('')}
@@ -396,6 +420,42 @@ function bindImportEvents() {
   });
 
   bindChecklistEvents();
+
+  // Holdings toggle
+  const holdingsToggle = document.getElementById('holdings-toggle');
+  const holdingsBody   = document.getElementById('holdings-body');
+  if (holdingsToggle && holdingsBody) {
+    if (app.holdings.size > 0) {
+      holdingsBody.style.display = '';
+      holdingsToggle.querySelector('span').textContent = '▼';
+    }
+    holdingsToggle.addEventListener('click', () => {
+      const open = holdingsBody.style.display !== 'none';
+      holdingsBody.style.display = open ? 'none' : '';
+      holdingsToggle.querySelector('span').textContent = open ? '▶' : '▼';
+    });
+  }
+
+  // Holdings parse
+  document.getElementById('parse-holdings-btn')?.addEventListener('click', () => {
+    const text = document.getElementById('holdings-paste')?.value || '';
+    const tickers = parseTickerText(text, false);
+    if (!tickers.length) { showToast('ティッカーが見つかりませんでした'); return; }
+    app.holdings = new Set(tickers.map(s => (typeof s === 'object' ? s.ticker : s)));
+    localStorage.setItem('canslim-holdings', JSON.stringify([...app.holdings]));
+    document.getElementById('holdings-status').textContent = `✓ ${app.holdings.size}銘柄を保存`;
+    renderImport();
+    renderAnalyze();
+  });
+
+  document.getElementById('clear-holdings-btn')?.addEventListener('click', () => {
+    app.holdings = new Set();
+    localStorage.removeItem('canslim-holdings');
+    document.getElementById('holdings-paste').value = '';
+    document.getElementById('holdings-status').textContent = 'クリアしました';
+    renderImport();
+    renderAnalyze();
+  });
 }
 
 function bindChecklistEvents() {
@@ -536,7 +596,11 @@ function renderStockCard(ticker) {
       <div class="stock-card-header">
         ${a.ibdRank != null ? `<span class="stock-card-rank">#${a.ibdRank}</span>` : ''}
         <span class="stock-card-ticker">${esc(ticker)}</span>
-        <span class="stock-card-name">${esc(a.companyName)}</span>
+        ${app.holdings.has(ticker) ? '<span class="badge-holding">保有中</span>' : ''}
+        <div class="stock-card-name-block">
+          <span class="stock-card-name">${esc(a.companyName)}</span>
+          ${a.businessDesc ? `<span class="stock-card-desc">${esc(a.businessDesc)}</span>` : ''}
+        </div>
         <button class="btn-fetch" data-fetch="${esc(ticker)}" title="Yahoo Financeから財務データを自動取得">📊 Yahoo取得</button>
         <div class="total-badge ${scoreClass(scores.total)}" id="badge-${ticker}">
           ${scores.total != null ? scores.total : '-'}
@@ -1194,7 +1258,7 @@ async function fetchYahooData(ticker) {
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 
   // v10 quoteSummary — full financial data
-  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory';
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory,assetProfile';
   const v10Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
     const url = `https://${h}.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=${modules}`;
     return tryFetch(fn(url)).then(j => {
@@ -1238,8 +1302,16 @@ async function fetchYahooData(ticker) {
     const fd  = r.financialData || {};
     const ks  = r.defaultKeyStatistics || {};
     const sd  = r.summaryDetail || {};
+    const ap  = r.assetProfile || {};
     const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
 
+    const name = ap.longName || ap.shortName || '';
+    if (name) data.companyName = name;
+    if (ap.longBusinessSummary) {
+      const s = ap.longBusinessSummary;
+      const cut = s.indexOf('. ', 40);
+      data.businessDesc = cut > 0 ? s.slice(0, cut + 1) : s.slice(0, 120) + (s.length > 120 ? '…' : '');
+    }
     if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
     if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
     if (fd.returnOnEquity?.raw != null) data.roe         = Math.round(fd.returnOnEquity.raw  * 100);
@@ -1263,6 +1335,8 @@ async function fetchYahooData(ticker) {
 
   } else if (result.src === 'v7') {
     const { r } = result;
+    const name = r.longName || r.shortName || '';
+    if (name) data.companyName = name;
     const price  = r.regularMarketPrice;
     const high52 = r.fiftyTwoWeekHigh;
     if (price && high52 && high52 > 0)
@@ -1288,7 +1362,14 @@ function applyFetchedData(ticker, data) {
   if (!a) return 0;
   let filled = 0;
   for (const [k, v] of Object.entries(data)) {
-    if (v != null) { a[k] = v; filled++; }
+    if (v != null) {
+      a[k] = v;
+      filled++;
+      if (k === 'companyName') {
+        const s = app.stocks.find(x => x.ticker === ticker);
+        if (s) s.companyName = v;
+      }
+    }
   }
   return filled;
 }

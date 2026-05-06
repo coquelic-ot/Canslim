@@ -153,9 +153,17 @@ function scoreClass(v) {
 }
 
 // ── TICKER PARSING ───────────────────────────────────────────
-// スクリーンショットを見ながら手動入力されたテキストからティッカーを抽出する
-function parseTickerText(text) {
-  const SKIP = new Set(['IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC','NEW','HIGH','LOW','BUY']);
+// strictMode=true: ランク+ティッカー行のみ（OCR用）
+// strictMode=false: スペース・カンマ区切りも受け入れる（手動入力用）
+function parseTickerText(text, strictMode = false) {
+  const SKIP = new Set([
+    'IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC',
+    'NEW','HIGH','LOW','BUY','PRICE','EPS','RS','SMR','COMP','YTD','QTR',
+    'PCT','AVG','MKT','CAP','SHS','EST','REV','NET','OPR','RANK','DAY',
+    'WK','MO','YR','ALL','RTG','ADJ','DIV','ROE','ROA','SMA','ATH','ATL',
+    'IPO','CEO','CFO','USA','NYSE','AMEX','OTC','ADR','REIT','MLP','SPAC',
+    'CAN','SLIM','IBD50','STOCK','SHARE','FUND','HOLD','SELL','OPEN','CLOSE',
+  ]);
   const stocks = [];
   const seen   = new Set();
   let autoRank = 1;
@@ -164,7 +172,7 @@ function parseTickerText(text) {
     const trimmed = line.trim().toUpperCase();
     if (!trimmed) continue;
 
-    // "1 NVDA" or "#3 AAPL" など: ランク付き形式
+    // "1 NVDA" or "#3 AAPL" など: ランク付き形式（OCR・手動両方で使用）
     const rankMatch = trimmed.match(/^#?(\d{1,3})\s+([A-Z]{1,5})\b/);
     if (rankMatch) {
       const r = parseInt(rankMatch[1]);
@@ -177,15 +185,17 @@ function parseTickerText(text) {
       continue;
     }
 
-    // ランクなし: カンマ・スペース区切り
-    for (const token of trimmed.split(/[,\s]+/)) {
-      const t = token.replace(/[^A-Z]/g, '');
-      if (!t || t.length < 1 || t.length > 5) continue;
-      if (SKIP.has(t) || seen.has(t)) continue;
-      if (!/^[A-Z]{1,5}$/.test(t)) continue;
-      seen.add(t);
-      stocks.push({ rank: autoRank++, ticker: t, companyName: '', compositeRating: null,
-                    epsRating: null, rsRating: null, smrRating: null, adRating: null });
+    // strictMode=falseのみ: ランクなし・カンマ/スペース区切り（手動入力用）
+    if (!strictMode) {
+      for (const token of trimmed.split(/[,\s]+/)) {
+        const t = token.replace(/[^A-Z]/g, '');
+        if (!t || t.length < 1 || t.length > 5) continue;
+        if (SKIP.has(t) || seen.has(t)) continue;
+        if (!/^[A-Z]{1,5}$/.test(t)) continue;
+        seen.add(t);
+        stocks.push({ rank: autoRank++, ticker: t, companyName: '', compositeRating: null,
+                      epsRating: null, rsRating: null, smrRating: null, adRating: null });
+      }
     }
   }
 
@@ -453,7 +463,7 @@ async function handleSlotUpload(file, idx) {
     const text = json.responses?.[0]?.fullTextAnnotation?.text || '';
     if (!text) { showToast(`スクショ${idx+1}: テキストが検出されませんでした`); return; }
 
-    const stocks = parseTickerText(text);
+    const stocks = parseTickerText(text, true); // strictMode: ランク+ティッカーのみ
     app.top50Slots[idx].manualText = text;
     app.top50Slots[idx].stocks = stocks;
     mergeSlotStocks();

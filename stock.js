@@ -1365,4 +1365,5 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+window.addEventListener('unload', function(){});
 window.addEventListener('pageshow', e => { if (e.persisted) window.location.reload(); });

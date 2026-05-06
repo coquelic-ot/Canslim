@@ -1175,3 +1175,37 @@ details[open] .ocr-paste-summary::before { content: '▼ '; }
 }
 .ocr-paste-area:focus { outline: none; background: #fafbff; }
 .ocr-paste-box > .btn { margin: 8px 12px; }
+
+/* ============================================================
+   SETTINGS MODAL
+   ============================================================ */
+.setting-block { margin-bottom: 12px; }
+.setting-label {
+  display: block;
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.setting-hint {
+  font-size: .72rem;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.setting-hint a { color: var(--primary); }
+.setting-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: .85rem;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.setting-input:focus { outline: 2px solid var(--primary); border-color: transparent; }
+.setting-status {
+  font-size: .72rem;
+  color: var(--success);
+  margin-left: 8px;
+}

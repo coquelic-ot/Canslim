@@ -518,7 +518,7 @@ function renderStockCard(ticker) {
           }
           <details class="ocr-paste-box">
             <summary class="ocr-paste-summary">📋 IBDテキスト貼り付けで自動入力</summary>
-            <p class="ocr-paste-guide">スマホ: IBDアプリのスクショを長押し →「テキストをコピー」(iOS Live Text / Google Lens)<br>PC: IBDページのテキストを選択コピー</p>
+            <p class="ocr-paste-guide">⚙️ 設定にAPIキーを入れると画像アップロードで自動OCR<br>手動: Google Lensアプリでスクショを開く → テキスト選択 → コピー → ここに貼り付け</p>
             <textarea class="ocr-paste-area" placeholder="EPS Rating: 95&#10;RS Rating: 91&#10;SMR Rating: A&#10;A/D Rating: B&#10;Composite Rating: 97"></textarea>
             <button class="btn btn-sm btn-primary" data-parse-ocr="${esc(ticker)}">解析して自動入力</button>
           </details>
@@ -716,7 +716,7 @@ function bindCardEvents(ticker) {
   const a = app.analyses[ticker];
   if (!a) return;
 
-  // IBD screenshot upload
+  // IBD screenshot upload → auto Vision OCR if key is set
   card.querySelectorAll('.ibd-file').forEach(input => {
     input.addEventListener('change', async e => {
       const file = e.target.files[0];
@@ -725,7 +725,8 @@ function bindCardEvents(ticker) {
         const dataURL = await fileToDataURL(file);
         a.screenshotThumb = dataURL;
         refreshCard(ticker);
-        showToast(`${ticker}: スクリーンショットを保存しました`);
+        const usedOcr = await runVisionOcr(ticker, dataURL);
+        if (!usedOcr) showToast(`${ticker}: スクリーンショットを保存しました`);
       } catch(ex) {
         showToast('アップロード失敗: ' + ex.message, 'error');
       }
@@ -1100,31 +1101,44 @@ function applyOcrText(ticker, text) {
   return filled;
 }
 
-// Tesseract.js を使ったOCR（画像→テキスト→レーティング抽出）
-async function runOcrOnCard(ticker, dataURL) {
-  if (typeof Tesseract === 'undefined') {
-    showToast(`${ticker}: Tesseract.jsが読み込まれていません`, 'error');
-    return;
-  }
-  showToast(`${ticker}: OCR解析中...（数秒かかります）`);
+// Google Cloud Vision API を使ったOCR
+async function runVisionOcr(ticker, dataURL) {
+  const key = localStorage.getItem('canslim-vision-key');
+  if (!key) return false; // キーなしはスキップ
+
+  showToast(`${ticker}: Google Vision OCR中...`);
   try {
-    const worker = await Tesseract.createWorker('eng');
-    const { data: { text } } = await worker.recognize(dataURL);
-    await worker.terminate();
+    const base64 = dataURL.includes(',') ? dataURL.split(',')[1] : dataURL;
+    const resp = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION' }] }],
+        }),
+      }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+    const json = await resp.json();
+    const text = json.responses?.[0]?.fullTextAnnotation?.text || '';
+    if (!text) { showToast(`${ticker}: テキストが検出されませんでした`); return true; }
     const filled = applyOcrText(ticker, text);
     refreshCard(ticker);
-    showToast(filled > 0
-      ? `${ticker}: OCRで${filled}項目を自動入力しました`
-      : `${ticker}: レーティングが検出されませんでした（手動で貼り付けもお試しください）`
-    );
+    showToast(filled > 0 ? `${ticker}: OCRで${filled}項目を自動入力しました` : `${ticker}: レーティングが検出されませんでした`);
+    return true;
   } catch (e) {
-    showToast(`${ticker}: OCR失敗 — ${e.message}`, 'error');
+    showToast(`${ticker}: Vision OCR失敗 — ${e.message}`, 'error');
+    return true;
   }
 }
 
 // Yahoo Finance から財務データを自動取得（corsproxy.io 経由）
 async function fetchYahooData(ticker) {
-  const modules = 'financialData,defaultKeyStatistics,summaryDetail';
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory';
   const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}`;
   const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(yahooUrl)}`;
 
@@ -1134,16 +1148,42 @@ async function fetchYahooData(ticker) {
   const r = json.quoteSummary?.result?.[0];
   if (!r) throw new Error('データが取得できませんでした');
 
-  const fd = r.financialData       || {};
-  const ks = r.defaultKeyStatistics || {};
-  const sd = r.summaryDetail        || {};
+  const fd  = r.financialData          || {};
+  const ks  = r.defaultKeyStatistics   || {};
+  const sd  = r.summaryDetail          || {};
+  const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
   const data = {};
 
-  if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw  * 100);
-  if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw   * 100);
-  if (fd.returnOnEquity?.raw != null) data.roe          = Math.round(fd.returnOnEquity.raw  * 100);
-  if (ks.floatShares?.raw    != null) data.floatShares  = Math.round(ks.floatShares.raw / 1e6);
+  // C: 四半期EPS成長・売上成長
+  if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
+  if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
 
+  // A: 年間EPS成長（net income CAGR）・ROE・連続増益年数
+  if (isl.length >= 2) {
+    const recent = isl[0]?.netIncome?.raw;
+    const oldest = isl[isl.length - 1]?.netIncome?.raw;
+    const years  = isl.length - 1;
+    if (recent && oldest && oldest > 0) {
+      data.annualEpsGrowth = Math.round((Math.pow(recent / oldest, 1 / years) - 1) * 100);
+    }
+    let streak = 0;
+    for (const s of isl) {
+      if ((s.netIncome?.raw || 0) > 0) streak++;
+      else break;
+    }
+    if (streak > 0) data.consecutiveYears = streak;
+  }
+  if (fd.returnOnEquity?.raw != null) data.roe = Math.round(fd.returnOnEquity.raw * 100);
+
+  // S: 浮動株
+  if (ks.floatShares?.raw != null) data.floatShares = Math.round(ks.floatShares.raw / 1e6);
+
+  // I: 機関投資家保有率
+  if (ks.heldPercentInstitutions?.raw != null) {
+    data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
+  }
+
+  // N: 52週高値からの下落%
   const price  = fd.currentPrice?.raw;
   const high52 = sd.fiftyTwoWeekHigh?.raw;
   if (price && high52 && high52 > 0) {
@@ -1170,8 +1210,11 @@ function init() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Settings modal (About)
+  // Settings modal
   document.getElementById('settings-btn').addEventListener('click', () => {
+    const saved = localStorage.getItem('canslim-vision-key') || '';
+    document.getElementById('vision-key-input').value = saved ? '••••••••' : '';
+    document.getElementById('vision-key-status').textContent = saved ? '✓ 設定済' : '';
     document.getElementById('settings-modal').classList.remove('hidden');
   });
   document.getElementById('close-settings').addEventListener('click', () => {
@@ -1179,6 +1222,17 @@ function init() {
   });
   document.getElementById('settings-modal').addEventListener('click', e => {
     if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+  });
+  document.getElementById('save-vision-key').addEventListener('click', () => {
+    const val = document.getElementById('vision-key-input').value.trim();
+    if (val && val !== '••••••••') {
+      localStorage.setItem('canslim-vision-key', val);
+      document.getElementById('vision-key-status').textContent = '✓ 保存しました';
+      document.getElementById('vision-key-input').value = '••••••••';
+    } else if (!val) {
+      localStorage.removeItem('canslim-vision-key');
+      document.getElementById('vision-key-status').textContent = '削除しました';
+    }
   });
 
   // Market modal

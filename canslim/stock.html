@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#1e3a5f" />
+  <title>CAN SLIM 銘柄チェッカー</title>
+  <link rel="stylesheet" href="stock.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <h1>CAN SLIM<span class="brand-sub"> 銘柄チェッカー</span></h1>
+      <p class="brand-caption">William O'Neil 式 銘柄選定ツール</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn-market" id="market-btn">
+        <span id="market-indicator">📊</span>
+        <span id="market-label">市場設定</span>
+      </button>
+      <button class="btn-icon" id="settings-btn" title="Claude API設定">⚙</button>
+    </div>
+  </div>
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="import">📥 インポート</button>
+    <button class="tab-btn" data-tab="analyze">📊 分析</button>
+    <button class="tab-btn" data-tab="compare">⚖ 比較</button>
+    <button class="tab-btn" data-tab="history">📋 履歴</button>
+  </nav>
+</header>
+
+<main class="main">
+  <div id="tab-import"  class="tab-panel active"></div>
+  <div id="tab-analyze" class="tab-panel"></div>
+  <div id="tab-compare" class="tab-panel"></div>
+  <div id="tab-history" class="tab-panel"></div>
+</main>
+
+<!-- Settings Modal -->
+<div class="modal-overlay hidden" id="settings-modal">
+  <div class="modal modal-sm">
+    <h2>ℹ️ このアプリについて</h2>
+    <p class="modal-desc">
+      <strong>CAN SLIM 銘柄チェッカー</strong><br>
+      William O'Neil 式の7項目でスコアリングする銘柄選定ツールです。<br><br>
+      OCRには <strong>Tesseract.js</strong>（ブラウザ内処理・無料）を使用。<br>
+      APIキー・サーバー通信は不要です。
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="close-settings">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- Market Direction Modal -->
+<div class="modal-overlay hidden" id="market-modal">
+  <div class="modal modal-sm">
+    <h2>市場トレンド（M）</h2>
+    <p class="modal-desc">全銘柄共通のスコアに反映されます。</p>
+    <div class="radio-group">
+      <label class="radio-card">
+        <input type="radio" name="market" value="bull" />
+        <span class="radio-icon">🟢</span>
+        <span class="radio-text">
+          <strong>強気相場</strong>
+          <small>上昇トレンド継続中</small>
+        </span>
+      </label>
+      <label class="radio-card">
+        <input type="radio" name="market" value="neutral" />
+        <span class="radio-icon">🟡</span>
+        <span class="radio-text">
+          <strong>中立・調整中</strong>
+          <small>方向感なし</small>
+        </span>
+      </label>
+      <label class="radio-card">
+        <input type="radio" name="market" value="bear" />
+        <span class="radio-icon">🔴</span>
+        <span class="radio-text">
+          <strong>弱気相場</strong>
+          <small>下降トレンド</small>
+        </span>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="save-market">設定</button>
+      <button class="btn btn-ghost" id="close-market">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="stock.js?v=5"></script>
+</body>
+</html>

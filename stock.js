@@ -4,12 +4,13 @@
 
 // ── STATE ───────────────────────────────────────────────────
 const app = {
-  marketTrend: localStorage.getItem('canslim-market')  || '',
-  top50Slots:  [null, null, null, null],
-  stocks:      [],
-  analyses:    {},
-  history:     JSON.parse(localStorage.getItem('canslim-history') || '[]'),
-  holdings:    new Set(JSON.parse(localStorage.getItem('canslim-holdings') || '[]')),
+  marketTrend:   localStorage.getItem('canslim-market')  || '',
+  top50Slots:    [null, null, null, null],
+  stocks:        [],
+  analyses:      {},
+  history:       JSON.parse(localStorage.getItem('canslim-history') || '[]'),
+  holdings:      new Set(JSON.parse(localStorage.getItem('canslim-holdings') || '[]')),
+  holdingsImage: localStorage.getItem('canslim-holdings-image') || null,
 };
 
 const CRITERIA = ['C','A','N','S','L','I','M'];
@@ -213,6 +214,22 @@ function fileToDataURL(file) {
   });
 }
 
+function compressImage(dataURL, maxW = 600, quality = 0.72) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const c = document.createElement('canvas');
+      c.width  = Math.round(img.width  * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataURL);
+    img.src = dataURL;
+  });
+}
+
 // ── DEFAULT ANALYSIS OBJECT ──────────────────────────────────
 function newAnalysis(ticker, companyName='', rank=null) {
   return {
@@ -296,15 +313,36 @@ function renderImport() {
       <!-- Moomoo保有銘柄 -->
       <div class="holdings-section">
         <div class="holdings-header" id="holdings-toggle" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1rem;">▶</span>
+          <span style="font-size:1rem;">${(app.holdings.size > 0 || app.holdingsImage) ? '▼' : '▶'}</span>
           <h3 style="margin:0;font-size:.9rem;">📂 保有銘柄インポート（Moomoo）</h3>
           ${app.holdings.size > 0 ? `<span class="holdings-count">${app.holdings.size}銘柄</span>` : ''}
         </div>
-        <div class="holdings-body" id="holdings-body" style="display:none;">
-          <p class="setting-hint">MoomooのポートフォリオページをGoogle Lens / Live Textでコピーして貼り付け。ティッカーを自動抽出します。</p>
-          <textarea id="holdings-paste" class="slot-ticker-area" rows="4" placeholder="例:&#10;STRL 1.4 885.00&#10;TSM 5 381.28&#10;NVDA 10 207.07"></textarea>
+        <div class="holdings-body" id="holdings-body" style="${(app.holdings.size > 0 || app.holdingsImage) ? '' : 'display:none;'}">
+          <div class="holdings-upload-row">
+            ${app.holdingsImage
+              ? `<div class="slot-filled" style="width:80px;flex-shrink:0;">
+                   <img src="${app.holdingsImage}" class="slot-thumb" id="holdings-img-thumb" title="タップで拡大" style="width:80px;height:auto;" />
+                   <label class="slot-reupload" title="差し替え">🔄
+                     <input type="file" accept="image/*" id="holdings-file" style="display:none;" />
+                   </label>
+                 </div>`
+              : `<div class="upload-zone slot-upload" style="width:80px;flex-shrink:0;min-height:80px;padding:8px 4px;">
+                   <div class="upload-icon" style="font-size:1.2rem;">📸</div>
+                   <p class="upload-text" style="font-size:.65rem;margin:2px 0;">スクショ</p>
+                   <input type="file" accept="image/*" id="holdings-file" />
+                 </div>`
+            }
+            <div style="flex:1;min-width:0;">
+              <p class="setting-hint" style="margin:0 0 6px;">
+                ${localStorage.getItem('canslim-vision-key')
+                  ? '📸 スクショをアップロード → Vision OCRで自動抽出'
+                  : '📸 スクショをアップロード（OCRキー設定時に自動抽出）<br>またはGoogle Lens / Live Textでコピーして下に貼り付け'}
+              </p>
+              <textarea id="holdings-paste" class="slot-ticker-area" rows="3" placeholder="テキストを貼り付け&#10;例: STRL TSM NVDA MU"></textarea>
+            </div>
+          </div>
           <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-primary" id="parse-holdings-btn">解析して保存</button>
+            <button class="btn btn-sm btn-primary" id="parse-holdings-btn">テキストから解析</button>
             <button class="btn btn-sm btn-ghost" id="clear-holdings-btn">クリア</button>
             <span id="holdings-status" style="font-size:.75rem;color:var(--text-2);"></span>
           </div>
@@ -425,10 +463,6 @@ function bindImportEvents() {
   const holdingsToggle = document.getElementById('holdings-toggle');
   const holdingsBody   = document.getElementById('holdings-body');
   if (holdingsToggle && holdingsBody) {
-    if (app.holdings.size > 0) {
-      holdingsBody.style.display = '';
-      holdingsToggle.querySelector('span').textContent = '▼';
-    }
     holdingsToggle.addEventListener('click', () => {
       const open = holdingsBody.style.display !== 'none';
       holdingsBody.style.display = open ? 'none' : '';
@@ -436,7 +470,53 @@ function bindImportEvents() {
     });
   }
 
-  // Holdings parse
+  // Holdings image upload + Vision OCR
+  document.getElementById('holdings-file')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    showToast('保有銘柄スクショを読み込み中...');
+    const dataURL = await fileToDataURL(file);
+    // 圧縮してlocalStorageに保存
+    try {
+      const compressed = await compressImage(dataURL, 620, 0.75);
+      app.holdingsImage = compressed;
+      localStorage.setItem('canslim-holdings-image', compressed);
+    } catch { app.holdingsImage = null; }
+    renderImport();
+
+    const key = localStorage.getItem('canslim-vision-key');
+    if (!key) { showToast('APIキー未設定 — テキストを手動で貼り付けてください'); return; }
+
+    showToast('保有銘柄: Vision OCR解析中...');
+    try {
+      const base64 = dataURL.includes(',') ? dataURL.split(',')[1] : dataURL;
+      const resp = await fetch(
+        `https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(key)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION' }] }] }) }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      const text = json.responses?.[0]?.fullTextAnnotation?.text || '';
+      if (!text) throw new Error('テキスト未検出');
+      const tickers = parseTickerText(text, false);
+      if (!tickers.length) throw new Error('ティッカー未検出');
+      app.holdings = new Set(tickers.map(s => typeof s === 'object' ? s.ticker : s));
+      localStorage.setItem('canslim-holdings', JSON.stringify([...app.holdings]));
+      renderImport();
+      renderAnalyze();
+      showToast(`✓ ${app.holdings.size}銘柄を自動抽出しました`);
+    } catch(err) {
+      showToast(`OCR失敗 (${err.message}) — テキストを手動で貼り付けてください`);
+    }
+  });
+
+  // Holdings image lightbox
+  document.getElementById('holdings-img-thumb')?.addEventListener('click', () => {
+    if (app.holdingsImage) showLightbox(app.holdingsImage);
+  });
+
+  // Holdings parse (text)
   document.getElementById('parse-holdings-btn')?.addEventListener('click', () => {
     const text = document.getElementById('holdings-paste')?.value || '';
     const tickers = parseTickerText(text, false);
@@ -450,9 +530,9 @@ function bindImportEvents() {
 
   document.getElementById('clear-holdings-btn')?.addEventListener('click', () => {
     app.holdings = new Set();
+    app.holdingsImage = null;
     localStorage.removeItem('canslim-holdings');
-    document.getElementById('holdings-paste').value = '';
-    document.getElementById('holdings-status').textContent = 'クリアしました';
+    localStorage.removeItem('canslim-holdings-image');
     renderImport();
     renderAnalyze();
   });

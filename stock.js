@@ -1365,3 +1365,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+window.addEventListener('pageshow', e => { if (e.persisted) window.location.reload(); });

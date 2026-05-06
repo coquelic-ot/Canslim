@@ -1248,6 +1248,58 @@ function applyFetchedData(ticker, data) {
 
 // ── INIT ─────────────────────────────────────────────────────
 function init() {
+  // モーダルをJSで描画（HTMLキャッシュに依存しないため）
+  document.getElementById('settings-modal').innerHTML = `
+    <div class="modal modal-sm">
+      <h2>⚙️ 設定</h2>
+      <div class="setting-block">
+        <label class="setting-label">Google Cloud Vision APIキー（OCR用・任意）</label>
+        <p class="setting-hint">
+          IBDスクショをアップロードすると自動OCRします。<br>
+          <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a> で無料取得（1,000回/月）
+        </p>
+        <input type="password" id="vision-key-input" class="setting-input" placeholder="AIza..." autocomplete="off" />
+        <button class="btn btn-sm btn-primary" id="save-vision-key">保存</button>
+        <span class="setting-status" id="vision-key-status"></span>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
+      <p class="modal-desc" style="font-size:.72rem;color:var(--text-3);">
+        CAN SLIM 銘柄チェッカー — William O'Neil 式スコアリングツール<br>
+        データ保存: localStorage のみ（サーバー通信なし）
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="close-settings">閉じる</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('market-modal').innerHTML = `
+    <div class="modal modal-sm">
+      <h2>市場トレンド（M）</h2>
+      <p class="modal-desc">全銘柄共通のスコアに反映されます。</p>
+      <div class="radio-group">
+        <label class="radio-card">
+          <input type="radio" name="market" value="bull" />
+          <span class="radio-icon">🟢</span>
+          <span class="radio-text"><strong>強気相場</strong><small>上昇トレンド継続中</small></span>
+        </label>
+        <label class="radio-card">
+          <input type="radio" name="market" value="neutral" />
+          <span class="radio-icon">🟡</span>
+          <span class="radio-text"><strong>中立・調整中</strong><small>方向感なし</small></span>
+        </label>
+        <label class="radio-card">
+          <input type="radio" name="market" value="bear" />
+          <span class="radio-icon">🔴</span>
+          <span class="radio-text"><strong>弱気相場</strong><small>下降トレンド</small></span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="save-market">設定</button>
+        <button class="btn btn-ghost" id="close-market">キャンセル</button>
+      </div>
+    </div>
+  `;
+
   // Tab navigation
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));

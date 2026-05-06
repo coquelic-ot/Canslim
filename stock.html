@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <meta name="theme-color" content="#1e3a5f" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>CAN SLIM 銘柄チェッカー</title>
   <link rel="stylesheet" href="stock.css" />
 </head>
@@ -20,7 +22,7 @@
         <span id="market-indicator">📊</span>
         <span id="market-label">市場設定</span>
       </button>
-      <button class="btn-icon" id="settings-btn" title="Claude API設定">⚙</button>
+      <button class="btn-icon" id="settings-btn" title="設定">⚙</button>
     </div>
   </div>
   <nav class="tab-nav">
@@ -38,68 +40,9 @@
   <div id="tab-history" class="tab-panel"></div>
 </main>
 
-<!-- Settings Modal -->
-<div class="modal-overlay hidden" id="settings-modal">
-  <div class="modal modal-sm">
-    <h2>⚙️ 設定</h2>
-    <div class="setting-block">
-      <label class="setting-label">Google Cloud Vision APIキー（OCR用・任意）</label>
-      <p class="setting-hint">
-        IBDスクショをアップロードすると自動OCRします。<br>
-        <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a> で無料取得（1,000回/月）
-      </p>
-      <input type="password" id="vision-key-input" class="setting-input" placeholder="AIza..." autocomplete="off" />
-      <button class="btn btn-sm btn-primary" id="save-vision-key">保存</button>
-      <span class="setting-status" id="vision-key-status"></span>
-    </div>
-    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
-    <p class="modal-desc" style="font-size:.72rem;color:var(--text-3);">
-      CAN SLIM 銘柄チェッカー — William O'Neil 式スコアリングツール<br>
-      データ保存: localStorage のみ（サーバー通信なし）
-    </p>
-    <div class="modal-actions">
-      <button class="btn btn-primary" id="close-settings">閉じる</button>
-    </div>
-  </div>
-</div>
-
-<!-- Market Direction Modal -->
-<div class="modal-overlay hidden" id="market-modal">
-  <div class="modal modal-sm">
-    <h2>市場トレンド（M）</h2>
-    <p class="modal-desc">全銘柄共通のスコアに反映されます。</p>
-    <div class="radio-group">
-      <label class="radio-card">
-        <input type="radio" name="market" value="bull" />
-        <span class="radio-icon">🟢</span>
-        <span class="radio-text">
-          <strong>強気相場</strong>
-          <small>上昇トレンド継続中</small>
-        </span>
-      </label>
-      <label class="radio-card">
-        <input type="radio" name="market" value="neutral" />
-        <span class="radio-icon">🟡</span>
-        <span class="radio-text">
-          <strong>中立・調整中</strong>
-          <small>方向感なし</small>
-        </span>
-      </label>
-      <label class="radio-card">
-        <input type="radio" name="market" value="bear" />
-        <span class="radio-icon">🔴</span>
-        <span class="radio-text">
-          <strong>弱気相場</strong>
-          <small>下降トレンド</small>
-        </span>
-      </label>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" id="save-market">設定</button>
-      <button class="btn btn-ghost" id="close-market">キャンセル</button>
-    </div>
-  </div>
-</div>
+<!-- モーダルはすべてstock.jsで描画 -->
+<div class="modal-overlay hidden" id="settings-modal"></div>
+<div class="modal-overlay hidden" id="market-modal"></div>
 
 <div class="toast hidden" id="toast"></div>
 
@@ -110,6 +53,6 @@
   <button class="lightbox-close" id="lightbox-close">✕</button>
 </div>
 
-<script src="stock.js?v=6"></script>
+<script src="stock.js?v=7"></script>
 </body>
 </html>

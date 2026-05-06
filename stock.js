@@ -425,13 +425,46 @@ function bindChecklistEvents() {
 async function handleSlotUpload(file, idx) {
   const dataURL = await fileToDataURL(file);
   const existingText = app.top50Slots[idx]?.manualText || '';
-  app.top50Slots[idx] = {
-    dataURL,
-    stocks: parseTickerText(existingText),
-    manualText: existingText,
-  };
+  app.top50Slots[idx] = { dataURL, stocks: parseTickerText(existingText), manualText: existingText };
   mergeSlotStocks();
   renderImport();
+
+  const key = localStorage.getItem('canslim-vision-key');
+  if (!key) return;
+
+  showToast(`スクショ${idx+1}: OCR解析中...`);
+  try {
+    const base64 = dataURL.includes(',') ? dataURL.split(',')[1] : dataURL;
+    const resp = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION' }] }],
+        }),
+      }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+    const json = await resp.json();
+    const text = json.responses?.[0]?.fullTextAnnotation?.text || '';
+    if (!text) { showToast(`スクショ${idx+1}: テキストが検出されませんでした`); return; }
+
+    const stocks = parseTickerText(text);
+    app.top50Slots[idx].manualText = text;
+    app.top50Slots[idx].stocks = stocks;
+    mergeSlotStocks();
+    renderImport();
+    showToast(stocks.length > 0
+      ? `スクショ${idx+1}: ${stocks.length}銘柄を読み込みました`
+      : `スクショ${idx+1}: 銘柄が検出されませんでした（手動入力してください）`
+    );
+  } catch(e) {
+    showToast(`スクショ${idx+1}: OCR失敗 — ${e.message}`, 'error');
+  }
 }
 
 function mergeSlotStocks() {

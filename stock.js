@@ -1180,20 +1180,25 @@ function parseStockPageText(text) {
   // EPS Rating (1-99)
   let m = text.match(/EPS\s+RATING[^\d]*(\d{1,2})/i);
   if (m) result.epsRating = Math.min(99, Math.max(1, parseInt(m[1])));
-  // RS Rating
-  m = text.match(/RS\s+RATING[^\d]*(\d{1,2})/i);
+  // RS / Relative Strength Rating (1-99)
+  m = text.match(/RELATIVE\s+STRENGTH\s+RATING[^\d]*(\d{1,2})/i);
+  if (!m) m = text.match(/RS\s+RATING[^\d]*(\d{1,2})/i);
   if (!m) m = text.match(/RELATIVE\s+STRENGTH[^\d]*(\d{1,2})/i);
   if (m) result.rsRating = Math.min(99, Math.max(1, parseInt(m[1])));
   // Composite Rating
   m = text.match(/COMPOSITE\s+RATING[^\d]*(\d{1,3})/i);
   if (m) result.compositeRating = Math.min(99, parseInt(m[1]));
-  // SMR Rating (letter grade A-E)
-  m = text.match(/SMR\s+RATING[^A-Ea-e]*([A-Ea-e])/i);
+  // SMR® Rating (letter grade A-E) — handle ® symbol
+  m = text.match(/SMR[^A-Za-z]*RATING[^A-Ea-e]*([A-Ea-e])/i);
   if (m) result.smrRating = m[1].toUpperCase();
-  // A/D (Accumulation/Distribution) Rating
-  m = text.match(/(?:ACC(?:UMULATION)?[/\s]+DIS(?:TRIBUTION)?|A\/D)\s+RATING[^A-Ea-e]*([A-Ea-e])/i);
+  // A/D (Acc/Dis) Rating — capture A/A+/B/B- etc., store first letter
+  m = text.match(/(?:ACC(?:UMULATION)?[/\s]+DIS(?:TRIBUTION)?|ACC\/DIS|A\/D)\s*RATING[^A-Ea-e]*([A-Ea-e])/i);
   if (!m) m = text.match(/A\/D\s*[:\-]\s*([A-Ea-e])/i);
   if (m) result.adRating = m[1].toUpperCase();
+  // Industry Group Rank (1 to 142) — IBD format: "Industry Group Rank (1 to 142) 8"
+  m = text.match(/Industry\s+Group\s+Rank\s*\([^)]*\)\s*(\d{1,3})/i);
+  if (!m) m = text.match(/Industry\s+Group\s+Rank[^\d]*(\d{1,3})/i);
+  if (m) result.industryRank = Math.min(197, Math.max(1, parseInt(m[1])));
   return result;
 }
 

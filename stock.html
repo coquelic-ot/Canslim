@@ -41,12 +41,21 @@
 <!-- Settings Modal -->
 <div class="modal-overlay hidden" id="settings-modal">
   <div class="modal modal-sm">
-    <h2>ℹ️ このアプリについて</h2>
-    <p class="modal-desc">
-      <strong>CAN SLIM 銘柄チェッカー</strong><br>
-      William O'Neil 式の7項目でスコアリングする銘柄選定ツールです。<br><br>
-      OCRには <strong>Tesseract.js</strong>（ブラウザ内処理・無料）を使用。<br>
-      APIキー・サーバー通信は不要です。
+    <h2>⚙️ 設定</h2>
+    <div class="setting-block">
+      <label class="setting-label">Google Cloud Vision APIキー（OCR用・任意）</label>
+      <p class="setting-hint">
+        IBDスクショをアップロードすると自動OCRします。<br>
+        <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a> で無料取得（1,000回/月）
+      </p>
+      <input type="password" id="vision-key-input" class="setting-input" placeholder="AIza..." autocomplete="off" />
+      <button class="btn btn-sm btn-primary" id="save-vision-key">保存</button>
+      <span class="setting-status" id="vision-key-status"></span>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
+    <p class="modal-desc" style="font-size:.72rem;color:var(--text-3);">
+      CAN SLIM 銘柄チェッカー — William O'Neil 式スコアリングツール<br>
+      データ保存: localStorage のみ（サーバー通信なし）
     </p>
     <div class="modal-actions">
       <button class="btn btn-primary" id="close-settings">閉じる</button>

@@ -1275,3 +1275,10 @@ details[open] .ocr-paste-summary::before { content: '▼ '; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.holdings-upload-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+#holdings-img-thumb { cursor: zoom-in; border-radius: 6px; }

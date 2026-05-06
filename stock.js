@@ -1181,7 +1181,7 @@ async function runVisionOcr(ticker, dataURL) {
 
 // Yahoo Finance から財務データを自動取得（複数プロキシでフォールバック）
 async function fetchYahooData(ticker) {
-  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory';
+  const t = encodeURIComponent(ticker);
   const proxyFns = [
     u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -1189,55 +1189,97 @@ async function fetchYahooData(ticker) {
     u => `https://thingproxy.freeboard.io/fetch/${u}`,
   ];
 
-  const makeAttempt = (host, proxyFn) => {
-    const yahooUrl = `https://${host}.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}&formatted=false`;
-    return fetch(proxyFn(yahooUrl), { signal: AbortSignal.timeout(12000) })
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(json => {
-        const r = json.quoteSummary?.result?.[0];
-        if (!r) throw new Error('データなし');
-        return r;
-      });
-  };
+  const sig = AbortSignal.timeout(15000);
+  const tryFetch = url => fetch(url, { signal: sig })
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 
-  const attempts = ['query2', 'query1'].flatMap(host => proxyFns.map(fn => makeAttempt(host, fn)));
+  // v10 quoteSummary — full financial data
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory';
+  const v10Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
+    const url = `https://${h}.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=${modules}`;
+    return tryFetch(fn(url)).then(j => {
+      const r = j.quoteSummary?.result?.[0];
+      if (!r) throw new Error('no v10 data');
+      return { src: 'v10', r };
+    });
+  }));
+
+  // v7 quote — lightweight; returns 52w high + basic metrics
+  const v7Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
+    const url = `https://${h}.finance.yahoo.com/v7/finance/quote?symbols=${t}`;
+    return tryFetch(fn(url)).then(j => {
+      const r = j.quoteResponse?.result?.[0];
+      if (!r) throw new Error('no v7 data');
+      return { src: 'v7', r };
+    });
+  }));
+
+  // v8 chart — 1y weekly OHLCV; compute 52w high from actual data
+  const v8Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
+    const url = `https://${h}.finance.yahoo.com/v8/finance/chart/${t}?interval=1wk&range=1y`;
+    return tryFetch(fn(url)).then(j => {
+      const cr = j.chart?.result?.[0];
+      if (!cr) throw new Error('no v8 data');
+      return { src: 'v8', r: cr };
+    });
+  }));
+
   let result;
   try {
-    result = await Promise.any(attempts);
+    result = await Promise.any([...v10Attempts, ...v7Attempts, ...v8Attempts]);
   } catch {
-    throw new Error('すべてのプロキシで失敗');
+    throw new Error('すべてのプロキシで失敗（Yahoo Finance blocked）');
   }
 
-  const r = result;
-  const fd  = r.financialData          || {};
-  const ks  = r.defaultKeyStatistics   || {};
-  const sd  = r.summaryDetail          || {};
-  const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
   const data = {};
 
-  if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
-  if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
-  if (fd.returnOnEquity?.raw != null) data.roe          = Math.round(fd.returnOnEquity.raw * 100);
-  if (ks.floatShares?.raw    != null) data.floatShares  = Math.round(ks.floatShares.raw / 1e6);
-  if (ks.heldPercentInstitutions?.raw != null) {
-    data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
-  }
-  if (isl.length >= 2) {
-    const recent = isl[0]?.netIncome?.raw;
-    const oldest = isl[isl.length - 1]?.netIncome?.raw;
-    const years  = isl.length - 1;
-    if (recent && oldest && oldest > 0) {
-      data.annualEpsGrowth = Math.round((Math.pow(recent / oldest, 1 / years) - 1) * 100);
+  if (result.src === 'v10') {
+    const { r } = result;
+    const fd  = r.financialData || {};
+    const ks  = r.defaultKeyStatistics || {};
+    const sd  = r.summaryDetail || {};
+    const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
+
+    if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
+    if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
+    if (fd.returnOnEquity?.raw != null) data.roe         = Math.round(fd.returnOnEquity.raw  * 100);
+    if (ks.floatShares?.raw    != null) data.floatShares = Math.round(ks.floatShares.raw / 1e6);
+    if (ks.heldPercentInstitutions?.raw != null)
+      data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
+    if (isl.length >= 2) {
+      const recent = isl[0]?.netIncome?.raw;
+      const oldest = isl[isl.length - 1]?.netIncome?.raw;
+      const years  = isl.length - 1;
+      if (recent && oldest && oldest > 0)
+        data.annualEpsGrowth = Math.round((Math.pow(recent / oldest, 1 / years) - 1) * 100);
+      let streak = 0;
+      for (const s of isl) { if ((s.netIncome?.raw || 0) > 0) streak++; else break; }
+      if (streak > 0) data.consecutiveYears = streak;
     }
-    let streak = 0;
-    for (const s of isl) { if ((s.netIncome?.raw || 0) > 0) streak++; else break; }
-    if (streak > 0) data.consecutiveYears = streak;
+    const price  = fd.currentPrice?.raw;
+    const high52 = sd.fiftyTwoWeekHigh?.raw;
+    if (price && high52 && high52 > 0)
+      data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
+
+  } else if (result.src === 'v7') {
+    const { r } = result;
+    const price  = r.regularMarketPrice;
+    const high52 = r.fiftyTwoWeekHigh;
+    if (price && high52 && high52 > 0)
+      data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
+    if (r.floatShares != null) data.floatShares = Math.round(r.floatShares / 1e6);
+
+  } else { // v8 chart
+    const { r } = result;
+    const price  = r.meta?.regularMarketPrice;
+    const highs  = (r.indicators?.quote?.[0]?.high || []).filter(h => h != null);
+    if (price && highs.length > 0) {
+      const high52 = Math.max(...highs);
+      data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
+    }
   }
-  const price  = fd.currentPrice?.raw;
-  const high52 = sd.fiftyTwoWeekHigh?.raw;
-  if (price && high52 && high52 > 0) {
-    data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
-  }
+
+  if (Object.keys(data).length === 0) throw new Error('データを取得できませんでした');
   return data;
 }
 
@@ -1263,9 +1305,16 @@ function init() {
           IBDスクショをアップロードすると自動OCRします。<br>
           <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a> で無料取得（1,000回/月）
         </p>
-        <input type="password" id="vision-key-input" class="setting-input" placeholder="AIza..." autocomplete="off" />
-        <button class="btn btn-sm btn-primary" id="save-vision-key">保存</button>
-        <span class="setting-status" id="vision-key-status"></span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="password" id="vision-key-input" class="setting-input" placeholder="AIza..." autocomplete="off" style="flex:1;min-width:0;" />
+          <button class="btn btn-sm" id="toggle-vision-key" title="表示/非表示" style="flex-shrink:0;">👁</button>
+          <button class="btn btn-sm" id="copy-vision-key" title="クリップボードにコピー" style="flex-shrink:0;">📋</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
+          <button class="btn btn-sm btn-primary" id="save-vision-key">保存</button>
+          <span class="setting-status" id="vision-key-status"></span>
+        </div>
+        <p class="setting-hint" style="color:#b45309;margin-top:4px;">⚠️ Safariのキャッシュクリア前に📋でコピーしておくと再入力不要です</p>
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
       <p class="modal-desc" style="font-size:.72rem;color:var(--text-3);">
@@ -1313,7 +1362,9 @@ function init() {
   // Settings modal
   document.getElementById('settings-btn').addEventListener('click', () => {
     const saved = localStorage.getItem('canslim-vision-key') || '';
-    document.getElementById('vision-key-input').value = saved ? '••••••••' : '';
+    const inp = document.getElementById('vision-key-input');
+    inp.type = 'password';
+    inp.value = saved || '';
     document.getElementById('vision-key-status').textContent = saved ? '✓ 設定済' : '';
     document.getElementById('settings-modal').classList.remove('hidden');
   });
@@ -1325,14 +1376,28 @@ function init() {
   });
   document.getElementById('save-vision-key').addEventListener('click', () => {
     const val = document.getElementById('vision-key-input').value.trim();
-    if (val && val !== '••••••••') {
+    if (val) {
       localStorage.setItem('canslim-vision-key', val);
       document.getElementById('vision-key-status').textContent = '✓ 保存しました';
-      document.getElementById('vision-key-input').value = '••••••••';
-    } else if (!val) {
+    } else {
       localStorage.removeItem('canslim-vision-key');
       document.getElementById('vision-key-status').textContent = '削除しました';
     }
+  });
+  document.getElementById('toggle-vision-key').addEventListener('click', () => {
+    const inp = document.getElementById('vision-key-input');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  });
+  document.getElementById('copy-vision-key').addEventListener('click', () => {
+    const val = localStorage.getItem('canslim-vision-key') || document.getElementById('vision-key-input').value;
+    if (!val) { showToast('キーが未設定です'); return; }
+    navigator.clipboard.writeText(val).then(() => {
+      document.getElementById('vision-key-status').textContent = '📋 コピーしました';
+    }).catch(() => {
+      document.getElementById('vision-key-input').type = 'text';
+      document.getElementById('vision-key-input').select();
+      showToast('テキストを選択しました — 長押しでコピー');
+    });
   });
 
   // Market modal

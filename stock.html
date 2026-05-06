@@ -7,7 +7,22 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <!-- bfcache無効化: unloadリスナーがあるページはiOS SafariがbfcacheしないためTesseract先祖返り防止 -->
-  <script>window.addEventListener('unload',function(){});window.addEventListener('pageshow',function(e){if(e.persisted)window.location.reload();});</script>
+  <script>
+    window.addEventListener('unload', function(){});
+    window.addEventListener('pageshow', function(e) {
+      if (e.persisted) window.location.replace(location.href);
+    });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then(function(reg) {
+        reg.addEventListener('updatefound', function() {
+          var nw = reg.installing;
+          nw.addEventListener('statechange', function() {
+            if (nw.state === 'activated') window.location.reload();
+          });
+        });
+      });
+    }
+  </script>
   <title>CAN SLIM 銘柄チェッカー</title>
   <link rel="stylesheet" href="stock.css?v=9" />
 </head>
@@ -55,6 +70,6 @@
   <button class="lightbox-close" id="lightbox-close">✕</button>
 </div>
 
-<script src="stock.js?v=10"></script>
+<script src="stock.js?v=11"></script>
 </body>
 </html>

@@ -1182,58 +1182,63 @@ async function runVisionOcr(ticker, dataURL) {
 // Yahoo Finance から財務データを自動取得（複数プロキシでフォールバック）
 async function fetchYahooData(ticker) {
   const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory';
-  const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}`;
-
-  const proxies = [
-    url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  const proxyFns = [
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    u => `https://thingproxy.freeboard.io/fetch/${u}`,
   ];
 
-  let lastErr;
-  for (const makeProxy of proxies) {
-    try {
-      const resp = await fetch(makeProxy(yahooUrl), { signal: AbortSignal.timeout(8000) });
-      if (!resp.ok) { lastErr = new Error(`HTTP ${resp.status}`); continue; }
-      const json = await resp.json();
-      const r = json.quoteSummary?.result?.[0];
-      if (!r) { lastErr = new Error('データなし'); continue; }
+  const makeAttempt = (host, proxyFn) => {
+    const yahooUrl = `https://${host}.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}&formatted=false`;
+    return fetch(proxyFn(yahooUrl), { signal: AbortSignal.timeout(12000) })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(json => {
+        const r = json.quoteSummary?.result?.[0];
+        if (!r) throw new Error('データなし');
+        return r;
+      });
+  };
 
-      const fd  = r.financialData          || {};
-      const ks  = r.defaultKeyStatistics   || {};
-      const sd  = r.summaryDetail          || {};
-      const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
-      const data = {};
-
-      if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
-      if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
-      if (fd.returnOnEquity?.raw != null) data.roe          = Math.round(fd.returnOnEquity.raw * 100);
-      if (ks.floatShares?.raw    != null) data.floatShares  = Math.round(ks.floatShares.raw / 1e6);
-      if (ks.heldPercentInstitutions?.raw != null) {
-        data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
-      }
-      if (isl.length >= 2) {
-        const recent = isl[0]?.netIncome?.raw;
-        const oldest = isl[isl.length - 1]?.netIncome?.raw;
-        const years  = isl.length - 1;
-        if (recent && oldest && oldest > 0) {
-          data.annualEpsGrowth = Math.round((Math.pow(recent / oldest, 1 / years) - 1) * 100);
-        }
-        let streak = 0;
-        for (const s of isl) { if ((s.netIncome?.raw || 0) > 0) streak++; else break; }
-        if (streak > 0) data.consecutiveYears = streak;
-      }
-      const price  = fd.currentPrice?.raw;
-      const high52 = sd.fiftyTwoWeekHigh?.raw;
-      if (price && high52 && high52 > 0) {
-        data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
-      }
-      return data;
-    } catch(e) {
-      lastErr = e;
-    }
+  const attempts = ['query2', 'query1'].flatMap(host => proxyFns.map(fn => makeAttempt(host, fn)));
+  let result;
+  try {
+    result = await Promise.any(attempts);
+  } catch {
+    throw new Error('すべてのプロキシで失敗');
   }
-  throw lastErr || new Error('すべてのプロキシで失敗しました');
+
+  const r = result;
+  const fd  = r.financialData          || {};
+  const ks  = r.defaultKeyStatistics   || {};
+  const sd  = r.summaryDetail          || {};
+  const isl = r.incomeStatementHistory?.incomeStatementHistory || [];
+  const data = {};
+
+  if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
+  if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
+  if (fd.returnOnEquity?.raw != null) data.roe          = Math.round(fd.returnOnEquity.raw * 100);
+  if (ks.floatShares?.raw    != null) data.floatShares  = Math.round(ks.floatShares.raw / 1e6);
+  if (ks.heldPercentInstitutions?.raw != null) {
+    data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
+  }
+  if (isl.length >= 2) {
+    const recent = isl[0]?.netIncome?.raw;
+    const oldest = isl[isl.length - 1]?.netIncome?.raw;
+    const years  = isl.length - 1;
+    if (recent && oldest && oldest > 0) {
+      data.annualEpsGrowth = Math.round((Math.pow(recent / oldest, 1 / years) - 1) * 100);
+    }
+    let streak = 0;
+    for (const s of isl) { if ((s.netIncome?.raw || 0) > 0) streak++; else break; }
+    if (streak > 0) data.consecutiveYears = streak;
+  }
+  const price  = fd.currentPrice?.raw;
+  const high52 = sd.fiftyTwoWeekHigh?.raw;
+  if (price && high52 && high52 > 0) {
+    data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
+  }
+  return data;
 }
 
 function applyFetchedData(ticker, data) {

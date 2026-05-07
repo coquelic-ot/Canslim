@@ -351,7 +351,7 @@ function renderImport() {
               ? `<div class="slot-filled" style="width:80px;flex-shrink:0;">
                    <img src="${app.holdingsImage}" class="slot-thumb" id="holdings-img-thumb" title="タップで拡大" style="width:80px;height:auto;" />
                    <label class="slot-reupload" title="差し替え">🔄
-                     <input type="file" accept="image/*" id="holdings-file" class="file-input" />
+                     <input type="file" accept="image/*" id="holdings-file" style="display:none;" />
                    </label>
                  </div>`
               : `<div class="upload-zone slot-upload" style="width:80px;flex-shrink:0;min-height:80px;padding:8px 4px;">

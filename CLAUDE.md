@@ -1,4 +1,4 @@
-# CLAUDE.md — Shoko-Tanaka リポジトリ
+# CLAUDE.md — Canslim リポジトリ
 
 ## プロジェクト概要
 
@@ -50,8 +50,8 @@ git checkout claude/oneill-stock-selector-ID7mD
 ```
 
 ### URL
-- CAN SLIM 銘柄チェッカー: `https://coquelic-ot.github.io/Shoko-Tanaka/stock.html`
-- Dictation Practice: `https://coquelic-ot.github.io/Shoko-Tanaka/`
+- CAN SLIM 銘柄チェッカー: `https://coquelic-ot.github.io/Canslim/stock.html`
+- Dictation Practice: `https://coquelic-ot.github.io/Canslim/`
 
 ### CAN SLIM スコアリング方針
 - 各項目 0〜100 点、入力値がない項目は `null`（スコア計算から除外）

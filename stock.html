@@ -8,11 +8,23 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <!-- bfcache無効化: unloadリスナーがあるページはiOS SafariがbfcacheしないためTesseract先祖返り防止 -->
   <script>
-    window.addEventListener('unload', function(){});
+    // Layer 1: pageshow fires on bfcache restore — setTimeout escapes iOS blocking
     window.addEventListener('pageshow', function(e) {
-      if (e.persisted) window.location.replace(location.href);
+      if (e.persisted) setTimeout(function() { window.location.replace(location.href); }, 50);
     });
+    // Layer 2: navigation type back_forward on DOMContentLoaded (non-bfcache stale guard)
+    document.addEventListener('DOMContentLoaded', function() {
+      try {
+        var nav = performance.getEntriesByType('navigation')[0];
+        if (nav && nav.type === 'back_forward') window.location.replace(location.href);
+      } catch(e) {}
+    });
+    window.addEventListener('unload', function(){});
     if ('serviceWorker' in navigator) {
+      // Layer 3: SW sends RELOAD on activate — catches pages queued in bfcache
+      navigator.serviceWorker.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'RELOAD') window.location.replace(location.href);
+      });
       navigator.serviceWorker.register('./sw.js').then(function(reg) {
         reg.addEventListener('updatefound', function() {
           var nw = reg.installing;
@@ -24,7 +36,7 @@
     }
   </script>
   <title>CAN SLIM 銘柄チェッカー</title>
-  <link rel="stylesheet" href="stock.css?v=9" />
+  <link rel="stylesheet" href="stock.css?v=10" />
 </head>
 <body>
 
@@ -70,6 +82,6 @@
   <button class="lightbox-close" id="lightbox-close">✕</button>
 </div>
 
-<script src="stock.js?v=11"></script>
+<script src="stock.js?v=12"></script>
 </body>
 </html>

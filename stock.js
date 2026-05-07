@@ -155,6 +155,34 @@ function scoreClass(v) {
 }
 
 // ── TICKER PARSING ───────────────────────────────────────────
+// Moomoo保有銘柄テキスト専用パーサー
+// 「大文字2〜5字 → 数字（数量/価格）」の行パターンのみをティッカーと判定
+function parseMoomooText(text) {
+  const SKIP = new Set([
+    'MV','QTY','PL','SG','SGD','USD','HKD','CNY','GBP','EUR','JPY','AUD','CAD','CHF',
+    'KRW','TWD','INR','BRL','NZD',
+    'ETF','INC','LLC','CORP','LTD','THE','AND','FOR','NYSE','AMEX','NASDAQ','OTC',
+    'TECH','TRADE','SEMI','INFR','ENVIR','SERV','TEC',
+    'IBD','TOP','CHG','VOL','PRI','EPS','RS','SMR','COMP','YTD','QTR','PCT',
+    'AVG','MKT','CAP','SHS','EST','REV','NET','OPR','RANK','DAY','WK','MO','YR',
+    'ROE','ROA','DIV','ATH','ATL','IPO','CAN','SLIM','HOLD','SELL','OPEN','CLOSE',
+  ]);
+  const seen = new Set();
+  const result = [];
+  // ティッカーの直後にスペース＋数字（数量や価格）が来るパターン
+  const re = /(?:^|[\s,])([A-Z]{2,5})\s+[\d,]+\.?\d*/gm;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[1];
+    if (!SKIP.has(t) && !seen.has(t)) { seen.add(t); result.push(t); }
+  }
+  // 見つからなければ汎用パーサーにフォールバック
+  if (!result.length) {
+    return parseTickerText(text, false).map(s => typeof s === 'object' ? s.ticker : s);
+  }
+  return result;
+}
+
 // strictMode=true: ランク+ティッカー行のみ（OCR用）
 // strictMode=false: スペース・カンマ区切りも受け入れる（手動入力用）
 function parseTickerText(text, strictMode = false) {
@@ -499,7 +527,7 @@ function bindImportEvents() {
       const json = await resp.json();
       const text = json.responses?.[0]?.fullTextAnnotation?.text || '';
       if (!text) throw new Error('テキスト未検出');
-      const tickers = parseTickerText(text, false);
+      const tickers = parseMoomooText(text);
       if (!tickers.length) throw new Error('ティッカー未検出');
       app.holdings = new Set(tickers.map(s => typeof s === 'object' ? s.ticker : s));
       localStorage.setItem('canslim-holdings', JSON.stringify([...app.holdings]));
@@ -519,9 +547,9 @@ function bindImportEvents() {
   // Holdings parse (text)
   document.getElementById('parse-holdings-btn')?.addEventListener('click', () => {
     const text = document.getElementById('holdings-paste')?.value || '';
-    const tickers = parseTickerText(text, false);
+    const tickers = parseMoomooText(text);
     if (!tickers.length) { showToast('ティッカーが見つかりませんでした'); return; }
-    app.holdings = new Set(tickers.map(s => (typeof s === 'object' ? s.ticker : s)));
+    app.holdings = new Set(tickers);
     localStorage.setItem('canslim-holdings', JSON.stringify([...app.holdings]));
     document.getElementById('holdings-status').textContent = `✓ ${app.holdings.size}銘柄を保存`;
     renderImport();
@@ -629,7 +657,7 @@ function mergeSlotStocks() {
       if (!seen.has(s.ticker)) {
         seen.add(s.ticker);
         const prev = app.stocks.find(x => x.ticker === s.ticker);
-        merged.push({ ...s, selected: prev ? prev.selected : true });
+        merged.push({ ...s, selected: prev ? prev.selected : false });
       }
     }
   }
@@ -1652,5 +1680,5 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
-window.addEventListener('unload', function(){});
+window.addEventListener('unload', function(){ saveWorkingSession(); });
 window.addEventListener('pageshow', e => { if (e.persisted) window.location.reload(); });

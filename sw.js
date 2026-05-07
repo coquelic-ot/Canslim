@@ -1,5 +1,5 @@
-// CAN SLIM Service Worker — network-first for navigation, RELOAD broadcast on activate
-const SW_VERSION = '2';
+// CAN SLIM Service Worker — adds Cache-Control: no-store to prevent bfcache
+const SW_VERSION = '3';
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -16,7 +16,13 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request, { cache: 'no-store' }).catch(() => fetch(e.request))
+      fetch(e.request, { cache: 'no-store' }).then(async resp => {
+        // Cache-Control: no-store on the response opts this page out of bfcache entirely
+        const headers = new Headers(resp.headers);
+        headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        const body = await resp.arrayBuffer();
+        return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+      }).catch(() => fetch(e.request))
     );
   }
 });

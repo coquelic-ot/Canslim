@@ -1225,6 +1225,21 @@ details[open] .ocr-paste-summary::before { content: '▼ '; }
   flex-shrink: 0;
 }
 .stock-item-holding { background: #f0fdf4; }
+
+/* チャートバッジ */
+.chart-badge {
+  font-size: .65rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.chart-badge-in_buy_zone { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.chart-badge-approaching  { background: #fef9c3; color: #713f12; border: 1px solid #fde68a; }
+.chart-badge-forming      { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.chart-badge-extended     { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .holdings-section {
   margin-top: 20px;
   border: 1px solid var(--border);

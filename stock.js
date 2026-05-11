@@ -11,6 +11,8 @@ const app = {
   history:       JSON.parse(localStorage.getItem('canslim-history') || '[]'),
   holdings:      new Set(JSON.parse(localStorage.getItem('canslim-holdings') || '[]')),
   holdingsImage: localStorage.getItem('canslim-holdings-image') || null,
+  backendData:   {},      // ticker → バックエンドJSON (IBD+Yahoo+チャート)
+  backendMeta:   null,    // { updated: ISO文字列 }
 };
 
 const CRITERIA = ['C','A','N','S','L','I','M'];
@@ -409,6 +411,7 @@ function buildStockListHTML() {
             <span class="stock-ticker">${esc(s.ticker)}</span>
             ${app.holdings.has(s.ticker) ? '<span class="badge-holding">保有中</span>' : ''}
             <span class="stock-name">${esc(s.companyName)}</span>
+            ${chartBadge(s.ticker)}
           </label>
         `).join('')}
       </div>
@@ -1677,6 +1680,106 @@ function init() {
   } else {
     renderImport();
   }
+
+  // バックエンドJSONを非同期で読み込み（存在する場合のみ）
+  loadBackendData();
+}
+
+// ── バックエンドデータ読み込み ────────────────────────────────
+
+const BACKEND_JSON_URL = './data/canslim.json';
+
+async function loadBackendData() {
+  try {
+    const res = await fetch(BACKEND_JSON_URL + '?_=' + Date.now());
+    if (!res.ok) return;
+    const json = await res.json();
+    app.backendMeta = { updated: json.updated };
+    app.backendData = {};
+    (json.stocks || []).forEach(s => { app.backendData[s.ticker] = s; });
+    // IBD50銘柄を自動インポート
+    _applyBackendStocks(json.stocks || []);
+    renderImport();
+    showToast(`📡 データ更新: ${_formatUpdated(json.updated)}`);
+  } catch (_) { /* バックエンドJSONが未作成の場合は無視 */ }
+}
+
+function _applyBackendStocks(stocks) {
+  const tickers = stocks.map(s => s.ticker);
+  if (!tickers.length) return;
+  // 既存のapp.stocksにマージ（重複排除）
+  const existing = new Set(app.stocks.map(s => s.ticker));
+  stocks.forEach(s => {
+    if (!existing.has(s.ticker)) {
+      app.stocks.push({
+        rank: s.rank, ticker: s.ticker,
+        companyName: s.companyName || '',
+        compositeRating: s.compositeRating || null,
+        selected: false,
+      });
+    }
+  });
+  // 分析データに反映
+  stocks.forEach(s => {
+    const a = app.analyses[s.ticker] || newAnalysis(s.ticker, s.companyName || '', s.rank);
+    // IBDレーティング
+    if (s.epsRating    != null) a.epsRating       = s.epsRating;
+    if (s.rsRating     != null) a.rsRating         = s.rsRating;
+    if (s.smrRating)            a.smrRating        = s.smrRating;
+    if (s.adRating)             a.adRating         = s.adRating;
+    if (s.compositeRating != null) a.compositeRating = s.compositeRating;
+    // Yahoo財務データ
+    if (s.qEpsGrowth    != null) a.qEpsGrowth      = s.qEpsGrowth;
+    if (s.annualEpsGrowth != null) a.annualEpsGrowth = s.annualEpsGrowth;
+    if (s.salesGrowth   != null) a.salesGrowth     = s.salesGrowth;
+    if (s.roe           != null) a.roe              = s.roe;
+    if (s.floatShares   != null) a.floatShares      = s.floatShares;
+    if (s.fromHigh52w   != null) a.fromHigh52w      = s.fromHigh52w;
+    if (s.instOwnership != null) a.instOwnership    = s.instOwnership;
+    if (s.companyName)           a.companyName      = s.companyName;
+    if (s.businessDesc)          a.businessDesc     = s.businessDesc;
+    // チャート → ピボット価格・パターン自動入力
+    const ch = s.chart || {};
+    if (ch.pivot != null) a.pivotPrice = ch.pivot;
+    if (ch.pattern) {
+      const PAT_MAP = {
+        cup_with_handle: 0,
+        flat_base:       1,
+        double_bottom:   2,
+        high_tight_flag: 5,
+      };
+      const idx = PAT_MAP[ch.pattern];
+      if (idx !== undefined) {
+        a.chartPatterns = a.chartPatterns || [false,false,false,false,false,false];
+        a.chartPatterns[idx] = true;
+      }
+    }
+    app.analyses[s.ticker] = a;
+  });
+  saveSession();
+}
+
+function _formatUpdated(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// インポートタブのチャート情報バッジ
+function chartBadge(ticker) {
+  const bd = app.backendData[ticker];
+  if (!bd) return '';
+  const ch = bd.chart || {};
+  const sit = ch.buySituation;
+  if (!sit || sit === 'no_pattern') return '';
+  const icons = { in_buy_zone: '🟢', approaching: '🟡', forming: '⬜', extended: '🔴' };
+  const icon = icons[sit] || '';
+  const pat  = ch.patternJp ? `${ch.patternJp} ` : '';
+  const piv  = ch.pivot ? `$${ch.pivot}` : '';
+  const pct  = ch.priceVsPivotPct != null
+    ? (ch.priceVsPivotPct >= 0 ? `+${ch.priceVsPivotPct}%` : `${ch.priceVsPivotPct}%`)
+    : '';
+  return `<span class="chart-badge chart-badge-${sit}">${icon} ${pat}${piv}${pct ? ' ('+pct+')' : ''}</span>`;
 }
 
 document.addEventListener('DOMContentLoaded', init);

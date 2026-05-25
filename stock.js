@@ -11,9 +11,28 @@ const app = {
   history:       JSON.parse(localStorage.getItem('canslim-history') || '[]'),
   holdings:      new Set(JSON.parse(localStorage.getItem('canslim-holdings') || '[]')),
   holdingsImage: localStorage.getItem('canslim-holdings-image') || null,
+  backendData:     {},      // ticker → バックエンドJSON (レーティング+Yahoo+チャート)
+  backendMeta:     null,    // { updated: ISO文字列 }
+  backendHoldings: [],      // Moomoo保有銘柄リスト
+  sellHistory:     [],      // Moomoo売り約定履歴 [{ticker, price, qty, date}]
 };
 
 const CRITERIA = ['C','A','N','S','L','I','M'];
+const SECTOR_META = {
+  'Technology':            { icon: '💻', label: 'テック',     color: '#dbeafe', text: '#1e40af' },
+  'Healthcare':            { icon: '🏥', label: 'ヘルス',     color: '#dcfce7', text: '#166534' },
+  'Financial Services':    { icon: '🏦', label: '金融',       color: '#fef9c3', text: '#854d0e' },
+  'Consumer Cyclical':     { icon: '🛍️', label: '消費財',    color: '#fce7f3', text: '#9d174d' },
+  'Consumer Defensive':    { icon: '🛒', label: '生活必需品', color: '#f0fdf4', text: '#14532d' },
+  'Energy':                { icon: '⚡', label: 'エネルギー', color: '#fef3c7', text: '#92400e' },
+  'Basic Materials':       { icon: '⛏️', label: '素材',      color: '#fdf4ff', text: '#6b21a8' },
+  'Industrials':           { icon: '🏭', label: '産業',       color: '#f1f5f9', text: '#334155' },
+  'Real Estate':           { icon: '🏠', label: '不動産',     color: '#fff7ed', text: '#9a3412' },
+  'Communication Services':{ icon: '📡', label: '通信',       color: '#eff6ff', text: '#1d4ed8' },
+  'Utilities':             { icon: '💡', label: '公益',       color: '#fafaf9', text: '#44403c' },
+};
+// 後方互換: 文字列ラベルだけ欲しい箇所用
+const SECTOR_LABEL = Object.fromEntries(Object.entries(SECTOR_META).map(([k,v]) => [k, v.label]));
 const CRITERIA_LABELS = {
   C: '直近四半期EPS',
   A: '年間EPS成長率',
@@ -72,7 +91,8 @@ function scoreS(a) {
 
 function scoreL(a) {
   const parts = [];
-  if (a.rsRating != null)      parts.push({ v: a.rsRating,            w: 0.7 });
+  const rs = a.rsRating ?? a.rsProxy; // rsRating preferred; Yahoo relative-strength proxy as fallback
+  if (rs != null)              parts.push({ v: rs,                    w: 0.7 });
   if (a.industryRank != null)  parts.push({ v: Math.max(0,100-a.industryRank), w: 0.3 });
   return wAvg(parts);
 }
@@ -100,7 +120,20 @@ function calculateScores(a) {
     M: scoreM(a),
   };
   const vals = Object.values(s).filter(v => v != null);
-  s.total = vals.length ? Math.round(vals.reduce((x,y)=>x+y,0)/vals.length) : null;
+  if (vals.length < 3) { s.total = null; s._scoredCount = vals.length; return s; }
+
+  const avg = vals.reduce((x,y) => x+y, 0) / vals.length;
+
+  // O'Neil 哲学: 赤（< 40）があると大きく減点 — 弱点ゼロが最重要
+  const redPenalty = vals
+    .filter(v => v < 40)
+    .reduce((sum, v) => sum + (40 - v) * 0.7, 0);
+
+  // 全項目が緑（≥ 70）なら +5 ボーナス
+  const allGreen = vals.every(v => v >= 70);
+
+  s.total = Math.min(100, Math.max(0, Math.round(avg - redPenalty + (allGreen ? 5 : 0))));
+  s._scoredCount = vals.length;
   return s;
 }
 
@@ -127,11 +160,12 @@ function mapConsecYears(v) {
 }
 function mapVolRatio(v)   {
   if (v >= 2.0) return 100; if (v >= 1.5) return 80; if (v >= 1.2) return 60;
-  if (v >= 1.0) return 40;  return 20;
+  if (v >= 1.0) return 45;  if (v >= 0.8) return 32;  return 18;
 }
 function mapFloat(v)      {
-  if (v <= 10)  return 100; if (v <= 50)  return 85; if (v <= 150) return 65;
-  if (v <= 300) return 45;  return 25;
+  // 大型株（浮動株多い）でも極端に低くなりすぎないよう対数スケールに近い設定
+  if (v <= 10)   return 100; if (v <= 50)   return 85; if (v <= 150)  return 68;
+  if (v <= 500)  return 52;  if (v <= 2000) return 38; return 28;
 }
 function mapInstOwn(v)    {
   if (v >= 20 && v <= 55) return 90;
@@ -154,6 +188,23 @@ function scoreClass(v) {
   return 'fail';
 }
 
+// 数値 0-100 を連続的な色強度のインラインスタイルに変換
+function scoreColorStyle(v) {
+  if (v == null) return 'background:#f1f5f9;color:#94a3b8;';
+  if (v >= 70) {
+    const d = Math.min(1, (v - 70) / 30);
+    const l = Math.round(52 - d * 20);
+    const s = Math.round(50 + d * 40);
+    return `background:hsl(142,${s}%,${l}%);color:#fff;`;
+  }
+  if (v >= 40) {
+    const d = (v - 40) / 30;
+    return `background:hsl(48,${Math.round(65 + d * 25)}%,${Math.round(76 - d * 10)}%);color:#78350f;`;
+  }
+  const d = v / 40;
+  return `background:hsl(0,${Math.round(55 + d * 25)}%,${Math.round(90 - d * 15)}%);color:#991b1b;`;
+}
+
 // ── TICKER PARSING ───────────────────────────────────────────
 // Moomoo保有銘柄テキスト専用パーサー
 // 「大文字2〜5字 → 数字（数量/価格）」の行パターンのみをティッカーと判定
@@ -163,7 +214,7 @@ function parseMoomooText(text) {
     'KRW','TWD','INR','BRL','NZD',
     'ETF','INC','LLC','CORP','LTD','THE','AND','FOR','NYSE','AMEX','NASDAQ','OTC',
     'TECH','TRADE','SEMI','INFR','ENVIR','SERV','TEC',
-    'IBD','TOP','CHG','VOL','PRI','EPS','RS','SMR','COMP','YTD','QTR','PCT',
+    'SCR','TOP','CHG','VOL','PRI','EPS','RS','SMR','COMP','YTD','QTR','PCT',
     'AVG','MKT','CAP','SHS','EST','REV','NET','OPR','RANK','DAY','WK','MO','YR',
     'ROE','ROA','DIV','ATH','ATL','IPO','CAN','SLIM','HOLD','SELL','OPEN','CLOSE',
   ]);
@@ -187,12 +238,16 @@ function parseMoomooText(text) {
 // strictMode=false: スペース・カンマ区切りも受け入れる（手動入力用）
 function parseTickerText(text, strictMode = false) {
   const SKIP = new Set([
-    'IBD','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC',
+    'SCR','TOP','CHG','VOL','PRI','THE','AND','FOR','USD','ETF','INC','LLC',
     'NEW','HIGH','LOW','BUY','PRICE','EPS','RS','SMR','COMP','YTD','QTR',
     'PCT','AVG','MKT','CAP','SHS','EST','REV','NET','OPR','RANK','DAY',
     'WK','MO','YR','ALL','RTG','ADJ','DIV','ROE','ROA','SMA','ATH','ATL',
     'IPO','CEO','CFO','USA','NYSE','AMEX','OTC','ADR','REIT','MLP','SPAC',
-    'CAN','SLIM','IBD50','STOCK','SHARE','FUND','HOLD','SELL','OPEN','CLOSE',
+    'CAN','SLIM','TOP50','STOCK','SHARE','FUND','HOLD','SELL','OPEN','CLOSE',
+    // スクリーナーページでよく出る列ヘッダ・語句
+    'SALES','PROFIT','MARGIN','GROWTH','RETURN','RATING','ANNUAL','GROUP',
+    'WEEKLY','DAILY','CHART','TRADE','LAST','GAIN','LOSS','TOTAL','SECTOR',
+    'FLOAT','INST','MGMT','SPONS','INDUS','CLASS','POINT','SCORE','RANK',
   ]);
   const stocks = [];
   const seen   = new Set();
@@ -261,8 +316,8 @@ function compressImage(dataURL, maxW = 600, quality = 0.72) {
 // ── DEFAULT ANALYSIS OBJECT ──────────────────────────────────
 function newAnalysis(ticker, companyName='', rank=null) {
   return {
-    ticker, companyName, businessDesc: null, ibdRank: rank,
-    // IBD Ratings
+    ticker, companyName, businessDesc: null, sector: null, industry: null, listRank: rank,
+    // Ratings
     compositeRating: null, epsRating: null, rsRating: null,
     smrRating: null, adRating: null,
     // C
@@ -276,7 +331,7 @@ function newAnalysis(ticker, companyName='', rank=null) {
     // I
     instOwnership: null, instTrend: '',
     // L
-    industryRank: null,
+    industryRank: null, rsProxy: null,
     // Chart
     chartPatterns: [false,false,false,false,false,false],
     pivotPrice: null, notes: '',
@@ -294,7 +349,7 @@ function renderImport() {
     <div class="section">
       <div class="section-header">
         <h2>Step 1 — 銘柄リスト入力</h2>
-        <p>IBDアプリのスクショを参考に、ティッカーシンボルを入力してください（最大4スロット）</p>
+        <p>証券会社アプリを参考に、ティッカーシンボルを入力してください（最大4スロット）</p>
       </div>
 
       <div class="slots-grid">
@@ -357,7 +412,7 @@ function renderImport() {
               : `<div class="upload-zone slot-upload" style="width:80px;flex-shrink:0;min-height:80px;padding:8px 4px;">
                    <div class="upload-icon" style="font-size:1.2rem;">📸</div>
                    <p class="upload-text" style="font-size:.65rem;margin:2px 0;">スクショ</p>
-                   <input type="file" accept="image/*" id="holdings-file" />
+                   <input type="file" accept="image/*" id="holdings-file" class="file-input" />
                  </div>`
             }
             <div style="flex:1;min-width:0;">
@@ -405,10 +460,11 @@ function buildStockListHTML() {
         ${app.stocks.map(s => `
           <label class="stock-item ${app.holdings.has(s.ticker) ? 'stock-item-holding' : ''}">
             <input type="checkbox" data-ticker="${esc(s.ticker)}" ${s.selected ? 'checked' : ''} />
-            <span class="stock-rank">#${s.rank}</span>
+            <span class="stock-rank">${s.rank != null ? '#' + s.rank : ''}</span>
             <span class="stock-ticker">${esc(s.ticker)}</span>
             ${app.holdings.has(s.ticker) ? '<span class="badge-holding">保有中</span>' : ''}
             <span class="stock-name">${esc(s.companyName)}</span>
+            ${chartBadge(s.ticker)}
           </label>
         `).join('')}
       </div>
@@ -674,7 +730,7 @@ function renderAnalyze() {
     panel.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">📥</div>
-        <p>まず「インポート」タブでIBD Top 50を読み込み、銘柄を選択してください。</p>
+        <p>まず「インポート」タブでウォッチリストを読み込み、銘柄を選択してください。</p>
       </div>`;
     return;
   }
@@ -684,7 +740,7 @@ function renderAnalyze() {
       <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;">
         <div>
           <h2>Step 2 — CAN SLIM 分析</h2>
-          <p>各銘柄のIBDスクリーンショットをアップロード、または手動で入力してください</p>
+          <p>各銘柄のスクリーンショットをアップロード、または手動で入力してください</p>
         </div>
         <button class="btn btn-success btn-sm" id="save-session-btn">💾 履歴に保存</button>
       </div>
@@ -705,7 +761,7 @@ function renderStockCard(ticker) {
   return `
     <div class="stock-card" id="card-${ticker}">
       <div class="stock-card-header">
-        ${a.ibdRank != null ? `<span class="stock-card-rank">#${a.ibdRank}</span>` : ''}
+        ${a.listRank != null ? `<span class="stock-card-rank">#${a.listRank}</span>` : ''}
         <span class="stock-card-ticker">${esc(ticker)}</span>
         ${app.holdings.has(ticker) ? '<span class="badge-holding">保有中</span>' : ''}
         <div class="stock-card-name-block">
@@ -726,18 +782,18 @@ function renderStockCard(ticker) {
                  <img src="${a.screenshotThumb}" class="card-ss-thumb" data-card-lightbox="1" title="タップで拡大" />
                  <span>スクリーンショット保存済 ✓</span>
                  <label style="cursor:pointer;color:#2563eb;font-size:.75rem;text-decoration:underline;">
-                   再アップ<input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" style="display:none;" />
+                   再アップ<input type="file" accept="image/*" class="ss-file" data-ticker="${ticker}" style="display:none;" />
                  </label>
                </div>`
             : `<div class="card-upload" id="upload-${ticker}">
-                 📸 IBDスクリーンショット（任意）
-                 <input type="file" accept="image/*" class="ibd-file" data-ticker="${ticker}" />
+                 📸 スクリーンショット（任意）
+                 <input type="file" accept="image/*" class="ss-file" data-ticker="${ticker}" />
                </div>`
           }
           <details class="ocr-paste-box">
-            <summary class="ocr-paste-summary">📋 IBDテキスト貼り付けで自動入力</summary>
+            <summary class="ocr-paste-summary">📋 レーティングテキスト貼り付けで自動入力</summary>
             <p class="ocr-paste-guide">⚙️ 設定にAPIキーを入れると画像アップロードで自動OCR<br>手動: Google Lensアプリでスクショを開く → テキスト選択 → コピー → ここに貼り付け</p>
-            <textarea class="ocr-paste-area" placeholder="EPS Rating: 95&#10;RS Rating: 91&#10;SMR Rating: A&#10;A/D Rating: B&#10;Composite Rating: 97"></textarea>
+            <textarea class="ocr-paste-area" placeholder="EPS Rating: 95&#10;RS Rating: 91&#10;SMR Rating: A&#10;Acc/Dis Rating: B&#10;Composite Rating: 97"></textarea>
             <button class="btn btn-sm btn-primary" data-parse-ocr="${esc(ticker)}">解析して自動入力</button>
           </details>
         </div>
@@ -822,7 +878,7 @@ function renderStockCard(ticker) {
           <h4 class="criteria-section" style="font-size:.75rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">S — 需給</h4>
           <div class="field-grid col3">
             <div class="fg">
-              <label>A/D Rating</label>
+              <label>需給評価 (A〜E)</label>
               <select data-field="adRating">
                 <option value="">-</option>
                 ${['A','B','C','D','E'].map(v=>`<option value="${v}" ${a.adRating===v?'selected':''}>${v}</option>`).join('')}
@@ -847,7 +903,7 @@ function renderStockCard(ticker) {
           <h4 class="criteria-section" style="font-size:.75rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">L — 相対強度</h4>
           <div class="field-grid">
             <div class="fg">
-              <label>RS Rating (1-99)</label>
+              <label>相対強度スコア (1-99)</label>
               <input type="number" min="1" max="99" data-field="rsRating" value="${a.rsRating??''}" placeholder="例: 85" />
               <span class="hint">理想: 80+</span>
             </div>
@@ -864,7 +920,7 @@ function renderStockCard(ticker) {
           <h4 class="criteria-section" style="font-size:.75rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">I — 機関投資家</h4>
           <div class="field-grid col3">
             <div class="fg">
-              <label>SMR Rating</label>
+              <label>財務評価 (A〜E)</label>
               <select data-field="smrRating">
                 <option value="">-</option>
                 ${['A','B','C','D','E'].map(v=>`<option value="${v}" ${a.smrRating===v?'selected':''}>${v}</option>`).join('')}
@@ -934,8 +990,8 @@ function bindCardEvents(ticker) {
   const a = app.analyses[ticker];
   if (!a) return;
 
-  // IBD screenshot upload → auto Vision OCR if key is set
-  card.querySelectorAll('.ibd-file').forEach(input => {
+  // screenshot upload → auto Vision OCR if key is set
+  card.querySelectorAll('.ss-file').forEach(input => {
     input.addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
@@ -944,7 +1000,7 @@ function bindCardEvents(ticker) {
         a.screenshotThumb = dataURL;
         refreshCard(ticker);
         const usedOcr = await runVisionOcr(ticker, dataURL);
-        if (!usedOcr) showToast(`${ticker}: スクリーンショットを保存しました`);
+        if (!usedOcr) await runTesseractOcr(ticker, dataURL);
       } catch(ex) {
         showToast('アップロード失敗: ' + ex.message, 'error');
       }
@@ -970,7 +1026,7 @@ function bindCardEvents(ticker) {
     }
   });
 
-  // OCR text paste → parse IBD ratings
+  // OCR text paste → parse ratings
   card.querySelector('[data-parse-ocr]')?.addEventListener('click', () => {
     const area = card.querySelector('.ocr-paste-area');
     const text = area?.value || '';
@@ -1271,10 +1327,471 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
   app.currentTab = name;
 
-  if      (name === 'import')  renderImport();
-  else if (name === 'analyze') renderAnalyze();
-  else if (name === 'compare') renderCompare();
-  else if (name === 'history') renderHistory();
+  if      (name === 'import')   renderImport();
+  else if (name === 'analyze')  renderAnalyze();
+  else if (name === 'screener') renderScreener();
+  else if (name === 'compare')  renderCompare();
+  else if (name === 'history')  renderHistory();
+}
+
+// ── SCREENER TAB ─────────────────────────────────────────────
+function renderScreener() {
+  const panel = document.getElementById('tab-screener');
+  const stocks = Object.values(app.backendData);
+
+  if (!stocks.length) {
+    const isFile = location.protocol === 'file:';
+    panel.innerHTML = `
+      <div class="screener-empty">
+        <div class="empty-icon">🔍</div>
+        <h3 style="font-size:.95rem;font-weight:700;margin-bottom:8px;">スクリーナーデータがありません</h3>
+        ${isFile ? `
+        <div class="screener-empty-card screener-empty-warn">
+          <b>⚠️ file:// で開いています</b><br>
+          ブラウザのセキュリティ制限により、ローカルファイルから JSON を読み込めません。<br>
+          以下のいずれかで開き直してください。
+          <div class="screener-empty-steps">
+            <div class="screener-empty-step">
+              <b>① GitHub Pages で開く（推奨）</b><br>
+              <a href="https://coquelic-ot.github.io/Canslim/stock.html" target="_blank" class="screener-empty-link">
+                coquelic-ot.github.io/Canslim/stock.html
+              </a>
+            </div>
+            <div class="screener-empty-step">
+              <b>② ローカル HTTP サーバーで開く</b><br>
+              <code>cd ~/Canslim &amp;&amp; python3 -m http.server 8080</code><br>
+              → <a href="http://localhost:8080/stock.html" target="_blank" class="screener-empty-link">localhost:8080/stock.html</a>
+            </div>
+          </div>
+        </div>` : `
+        <div class="screener-empty-card">
+          <b>📡 データ取得に失敗しました</b><br>
+          <code>data/canslim.json</code> が見つかりません。<br>
+          Moomoo OpenD を起動してから「▶ バックエンド実行」を押してください。
+          <div class="screener-empty-steps">
+            <div class="screener-empty-step">
+              <b>① Moomoo OpenD を起動</b>（ポート 11111）
+            </div>
+            <div class="screener-empty-step">
+              <b>② APIサーバーを起動（初回のみ）</b><br>
+              <code>cd ~/Canslim/backend &amp;&amp; source .venv/bin/activate &amp;&amp; python server.py</code>
+            </div>
+          </div>
+        </div>`}
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:12px;">
+          <button class="btn btn-primary" id="scr-run-btn-empty">▶ バックエンド実行</button>
+          <button class="btn btn-ghost" id="screener-reload">🔄 再読み込み</button>
+        </div>
+        <div class="scr-run-panel" id="scr-run-panel" style="display:none;max-width:480px;margin:12px auto 0">
+          <div class="scr-run-header">
+            <span class="scr-run-status" id="scr-run-status">待機中</span>
+            <button class="scr-run-close" id="scr-run-close">✕</button>
+          </div>
+          <pre class="scr-run-log" id="scr-run-log"></pre>
+        </div>
+      </div>`;
+    panel.querySelector('#screener-reload').addEventListener('click', async () => {
+      await loadBackendData();
+    });
+    panel.querySelector('#scr-run-btn-empty').addEventListener('click', () => _runBackend());
+    panel.querySelector('#scr-run-close').addEventListener('click', () => {
+      document.getElementById('scr-run-panel').style.display = 'none';
+    });
+    return;
+  }
+
+  const updated = app.backendMeta?.updated ? _formatUpdated(app.backendMeta.updated) : '—';
+
+  const SECTIONS = [
+    { key: 'in_buy_zone', label: '🟢 買いゾーン内',             cls: 'sit-buy'  },
+    { key: 'approaching', label: '🟡 ピボット接近中（-10%以内）', cls: 'sit-near' },
+    { key: 'forming',     label: '⬜ ベース形成中',              cls: 'sit-form' },
+    { key: 'extended',    label: '🔴 買いゾーン超過',            cls: 'sit-ext'  },
+    { key: 'downtrend',   label: '⛔ 圏外（下降トレンド）',      cls: 'sit-down' },
+  ];
+
+  const grouped = {};
+  SECTIONS.forEach(s => { grouped[s.key] = []; });
+  stocks.forEach(s => {
+    const ch = s.chart || {};
+    if (ch.maStatus === 'below_50') { grouped['downtrend'].push(s); return; }
+    const sit = ch.buySituation;
+    if (sit && grouped[sit]) grouped[sit].push(s);
+  });
+
+  grouped['in_buy_zone'].sort((a, b) => (a.chart?.priceVsPivotPct ?? 999) - (b.chart?.priceVsPivotPct ?? 999));
+  grouped['approaching'].sort((a, b) => (b.chart?.priceVsPivotPct ?? -999) - (a.chart?.priceVsPivotPct ?? -999));
+  grouped['forming'].sort((a, b) => (b.chart?.priceVsPivotPct ?? -999) - (a.chart?.priceVsPivotPct ?? -999));
+
+  function rowHtml(s) {
+    const ch     = s.chart || {};
+    const price  = s.price != null ? `$${s.price.toFixed(2)}` : '—';
+    const pivot  = ch.pivot != null ? `$${ch.pivot.toFixed(2)}` : '—';
+    const raw    = ch.priceVsPivotPct;
+    const pct    = raw != null ? `${raw >= 0 ? '+' : ''}${raw.toFixed(1)}%` : '—';
+    const pctCls = raw == null ? '' : raw >= 0 ? 'scr-pct-pos' : raw >= -3 ? 'scr-pct-near' : 'scr-pct-neg';
+    const pat    = ch.patternJp ? `<span class="scr-pat">${esc(ch.patternJp)}</span>` : '';
+    const weeks  = ch.baseWeeks != null ? `<span class="scr-weeks">${ch.baseWeeks}週</span>` : '';
+    const held    = s.holding      ? `<span class="scr-held">保有</span>` : '';
+    const top50Badge   = s.top50Current ? `<span class="scr-top50">Top50</span>` : '';
+    const listRank = s.top50Current && s.top50Rank != null ? `<span class="scr-top50-rank">#${s.top50Rank}</span>` : '';
+    const closes  = s.weeklyCloses || [];
+    const mini    = closes.length ? `<span class="scr-mini">${_makeSparkline(closes, ch.pivot, s.price, ch.buySituation)}</span>` : '';
+    const ana     = app.analyses[s.ticker];
+    const scores  = ana ? calculateScores(ana) : null;
+    const total   = scores?.total;
+    const scoreBadge  = total != null ? `<span class="scr-score-badge" style="${scoreColorStyle(total)}">${total}</span>` : '';
+    const critBar = `<span class="scr-crit-bar">${CRITERIA.map(c => {
+      const v = scores ? scores[c] : null;
+      return `<span class="scr-crit-dot" style="${scoreColorStyle(v)}" title="${CRITERIA_LABELS[c]}: ${v ?? '—'}">${c}</span>`;
+    }).join('')}</span>`;
+    const cname   = ana?.companyName || '';
+    const sectorM   = ana?.sector ? (SECTOR_META[ana.sector] || null) : null;
+    const sectorChip = sectorM
+      ? `<span class="scr-sector" style="background:${sectorM.color};color:${sectorM.text}" title="${esc(ana.sector)}">${sectorM.icon} ${sectorM.label}</span>`
+      : '';
+    return `
+      <div class="scr-row" data-ticker="${esc(s.ticker)}">
+        ${scoreBadge}
+        <span class="scr-ticker">${esc(s.ticker)}</span>
+        ${mini}
+        ${pat}${weeks}
+        ${sectorChip}
+        ${cname ? `<span class="scr-cname">${esc(cname)}</span>` : ''}
+        ${top50Badge}${listRank}${held}
+        <span class="scr-spacer"></span>
+        ${critBar}
+        <span class="scr-price">${price}</span>
+        <span class="scr-arrow">▶</span>
+        <span class="scr-pivot">${pivot}</span>
+        <span class="scr-pct ${pctCls}">${pct}</span>
+      </div>`;
+  }
+
+  function holdingsHtml() {
+    const list = app.backendHoldings;
+    if (!list.length) return '';
+    const rows = list.map(h => {
+      const pl = h.plRatio;
+      const plStr  = pl != null ? `${pl >= 0 ? '+' : ''}${pl.toFixed(1)}%` : '—';
+      const plCls  = pl == null ? '' : pl >= 0 ? 'scr-pct-pos' : 'scr-pct-neg';
+      const price  = h.price != null ? `$${h.price.toFixed(2)}` : '—';
+      const cost   = h.costPrice != null ? `$${h.costPrice.toFixed(2)}` : '—';
+      const mktVal = h.marketVal != null ? `$${(h.marketVal / 1000).toFixed(1)}k` : '—';
+      const bd     = app.backendData[h.ticker];
+      const sit    = bd?.chart?.buySituation;
+      const closes  = bd?.weeklyCloses || [];
+      const ch      = bd?.chart || {};
+      const mini    = closes.length ? `<span class="scr-mini">${_makeSparkline(closes, ch.pivot, h.price, sit)}</span>` : '';
+      const hAna    = app.analyses[h.ticker];
+      const hScores = hAna ? calculateScores(hAna) : null;
+      const hTotal  = hScores?.total;
+      const hScoreBadge = hTotal != null ? `<span class="scr-score-badge" style="${scoreColorStyle(hTotal)}">${hTotal}</span>` : '';
+      const hCritBar = `<span class="scr-crit-bar">${CRITERIA.map(c => {
+        const v = hScores ? hScores[c] : null;
+        return `<span class="scr-crit-dot" style="${scoreColorStyle(v)}" title="${CRITERIA_LABELS[c]}: ${v ?? '—'}">${c}</span>`;
+      }).join('')}</span>`;
+      return `
+        <div class="scr-row scr-holding-row" data-ticker="${esc(h.ticker)}">
+          ${hScoreBadge}
+          ${mini}
+          <span class="scr-ticker">${esc(h.ticker)}</span>
+          <span class="scr-qty">${h.qty > 0 ? h.qty.toFixed(0) + '株' : ''}</span>
+          <span class="scr-spacer"></span>
+          ${hCritBar}
+          <span class="scr-label">コスト</span><span class="scr-cost">${cost}</span>
+          <span class="scr-label">現値</span><span class="scr-price">${price}</span>
+          <span class="scr-pct ${plCls}">${plStr}</span>
+          <span class="scr-label">評価</span><span class="scr-mktval">${h.qty > 0 ? mktVal : ''}</span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="scr-section scr-section-holdings">
+        <div class="scr-section-hd">
+          <span>📂 保有銘柄（Moomoo）</span>
+          <span class="scr-cnt">${list.length}銘柄</span>
+        </div>
+        <div class="scr-rows">${rows}</div>
+      </div>`;
+  }
+
+  const sectionsHtml = SECTIONS.map(sec => {
+    const list = grouped[sec.key];
+    if (!list.length) return '';
+    return `
+      <div class="scr-section ${sec.cls}">
+        <div class="scr-section-hd">
+          <span>${sec.label}</span>
+          <span class="scr-cnt">${list.length}銘柄</span>
+        </div>
+        <div class="scr-rows">${list.map(rowHtml).join('')}</div>
+      </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="section">
+      <div class="scr-meta">
+        <span class="scr-updated">📡 更新: ${updated}</span>
+        <button class="btn btn-ghost btn-sm" id="scr-refresh">🔄 再読み込み</button>
+        <button class="btn btn-primary btn-sm" id="scr-run-btn">▶ バックエンド実行</button>
+      </div>
+      <div class="scr-run-panel" id="scr-run-panel" style="display:none">
+        <div class="scr-run-header">
+          <span class="scr-run-status" id="scr-run-status">待機中</span>
+          <button class="scr-run-close" id="scr-run-close">✕</button>
+        </div>
+        <pre class="scr-run-log" id="scr-run-log"></pre>
+      </div>
+      ${holdingsHtml()}
+      ${sectionsHtml || '<p style="padding:24px;color:var(--text-2)">パターン検出銘柄なし</p>'}
+    </div>`;
+
+  panel.querySelector('#scr-refresh').addEventListener('click', async () => {
+    await loadBackendData();
+  });
+
+  panel.querySelector('#scr-run-btn').addEventListener('click', () => _runBackend());
+  panel.querySelector('#scr-run-close').addEventListener('click', () => {
+    document.getElementById('scr-run-panel').style.display = 'none';
+  });
+
+  // チャートツールチップ（body直下に1つだけ・毎回HTML更新）
+  document.getElementById('scr-tip')?.remove();
+  {
+    const tip = document.createElement('div');
+    tip.id = 'scr-tip';
+    tip.className = 'scr-tip scr-tip-hidden';
+    tip.innerHTML = `
+      <div class="scr-tip-hd">
+        <span class="scr-tip-ticker"></span>
+        <span class="scr-tip-top50" style="display:none"></span>
+        <span class="scr-tip-pat"></span>
+        <span class="scr-tip-total" style="display:none"></span>
+      </div>
+      <div class="scr-tip-cname"></div>
+      <div class="scr-tip-desc"></div>
+      <div class="scr-tip-svg"></div>
+      <div class="scr-tip-info">
+        <span>現値 <b class="scr-tip-price"></b></span>
+        <span>pivot <b class="scr-tip-pivot"></b></span>
+        <b class="scr-tip-pct"></b>
+      </div>
+      <div class="scr-tip-canslim" style="display:none"></div>
+      <div class="scr-tip-ratings">
+        <span>総合 <b class="scr-tip-comp"></b></span>
+        <span>EPS <b class="scr-tip-eps"></b></span>
+        <span>RS <b class="scr-tip-rs"></b></span>
+        <span>財務 <b class="scr-tip-smr"></b></span>
+        <span>需給 <b class="scr-tip-ad"></b></span>
+      </div>`;
+    document.body.appendChild(tip);
+  }
+  const tip = document.getElementById('scr-tip');
+
+  panel.querySelectorAll('.scr-row').forEach(row => {
+    row.addEventListener('mouseenter', () => {
+      const ticker = row.dataset.ticker;
+      const bd = app.backendData[ticker];
+      const ch = (bd || {}).chart || {};
+
+      const price = bd?.price;
+      const pct   = ch.priceVsPivotPct;
+      tip.querySelector('.scr-tip-ticker').textContent = ticker;
+      tip.querySelector('.scr-tip-pat').textContent    = ch.patternJp || '';
+      const ana0tip = app.analyses[ticker] || {};
+      const cnameEl = tip.querySelector('.scr-tip-cname');
+      const descEl  = tip.querySelector('.scr-tip-desc');
+      if (ana0tip.companyName) {
+        const sM   = ana0tip.sector ? SECTOR_META[ana0tip.sector] : null;
+        const sTag = sM ? ` ${sM.icon} ${sM.label}` : (ana0tip.sector ? ` [${ana0tip.sector}]` : '');
+        cnameEl.textContent = ana0tip.companyName + sTag;
+        cnameEl.style.display = '';
+      } else {
+        cnameEl.style.display = 'none';
+      }
+      if (ana0tip.businessDesc) {
+        descEl.textContent = ana0tip.businessDesc;
+        descEl.style.display = '';
+      } else {
+        descEl.style.display = 'none';
+      }
+      tip.querySelector('.scr-tip-price').textContent  = price != null ? `$${price.toFixed(2)}` : '—';
+      tip.querySelector('.scr-tip-pivot').textContent  = ch.pivot != null ? `$${ch.pivot.toFixed(2)}` : '—';
+      const pctEl = tip.querySelector('.scr-tip-pct');
+      pctEl.textContent = pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '';
+      pctEl.className   = 'scr-tip-pct ' + (pct == null ? '' : pct >= 0 ? 'scr-pct-pos' : pct >= -3 ? 'scr-pct-near' : 'scr-pct-neg');
+
+      // Top50バッジ
+      const top50El = tip.querySelector('.scr-tip-top50');
+      if (bd?.top50Current) {
+        top50El.textContent   = bd.top50Rank != null ? `Top50 #${bd.top50Rank}` : 'Top50';
+        top50El.style.display = '';
+      } else {
+        top50El.style.display = 'none';
+      }
+
+      // レーティング（常に表示 — app.analysesから取得）
+      const ana0 = app.analyses[ticker] || {};
+      const ratingsEl = tip.querySelector('.scr-tip-ratings');
+      const comp = ana0.compositeRating, eps = ana0.epsRating, rs = ana0.rsRating;
+      const smr = ana0.smrRating, ad = ana0.adRating;
+      tip.querySelector('.scr-tip-comp').innerHTML = comp != null ? `<b style="${scoreColorStyle(comp)};padding:1px 4px;border-radius:3px;">${comp}</b>` : '—';
+      tip.querySelector('.scr-tip-eps').innerHTML  = eps  != null ? `<b style="${scoreColorStyle(eps)};padding:1px 4px;border-radius:3px;">${eps}</b>`   : '—';
+      tip.querySelector('.scr-tip-rs').innerHTML   = rs   != null ? `<b style="${scoreColorStyle(rs)};padding:1px 4px;border-radius:3px;">${rs}</b>`     : '—';
+      tip.querySelector('.scr-tip-smr').textContent = smr ?? '—';
+      tip.querySelector('.scr-tip-ad').textContent  = ad  ?? '—';
+      ratingsEl.style.display = '';
+
+      // CAN SLIM スコア（常に全7項目を表示）
+      const ana       = app.analyses[ticker];
+      const scr       = ana ? calculateScores(ana) : null;
+      const canslimEl = tip.querySelector('.scr-tip-canslim');
+      const totalEl   = tip.querySelector('.scr-tip-total');
+      canslimEl.innerHTML = CRITERIA.map(c => {
+        const v = scr ? scr[c] : null;
+        return `<span class="scr-tip-crit"><b class="scr-tip-crit-lbl" style="${scoreColorStyle(v)}">${c}</b><small>${v != null ? v : '—'}</small></span>`;
+      }).join('');
+      canslimEl.style.display = '';
+      if (scr && scr.total != null) {
+        totalEl.textContent    = scr.total;
+        totalEl.style.cssText  = scoreColorStyle(scr.total) + 'margin-left:auto;font-size:.72rem;font-weight:800;padding:2px 7px;border-radius:20px;';
+        totalEl.style.display  = '';
+      } else {
+        totalEl.style.display = 'none';
+      }
+
+      const holding    = app.backendHoldings.find(h => h.ticker === ticker);
+      const costPrice  = holding?.costPrice ?? null;
+      const sellPrices = app.sellHistory.filter(s => s.ticker === ticker).map(s => s.price);
+      const closes = bd?.weeklyCloses || [];
+      tip.querySelector('.scr-tip-svg').innerHTML = closes.length
+        ? _makeChartSvg(closes, ch.pivot, price, ch.buySituation, costPrice, sellPrices)
+        : '';
+
+      tip.classList.remove('scr-tip-hidden');
+      _positionTip(tip);
+    });
+
+    row.addEventListener('mouseleave', () => tip.classList.add('scr-tip-hidden'));
+
+    row.addEventListener('click', () => {
+      tip.classList.add('scr-tip-hidden');
+      const ticker = row.dataset.ticker;
+      // 分析タブに遷移する前に selected=true にしてカードが表示されるようにする
+      const s = app.stocks.find(x => x.ticker === ticker);
+      if (s) {
+        s.selected = true;
+      } else {
+        // app.stocks にない場合（バックエンド専用銘柄）は追加
+        const autoRank = Math.max(0, ...app.stocks.map(x => x.rank || 0)) + 1;
+        app.stocks.push({ rank: autoRank, ticker, companyName: app.analyses[ticker]?.companyName || '', selected: true });
+      }
+      if (!app.analyses[ticker]) app.analyses[ticker] = newAnalysis(ticker);
+      switchTab('analyze');
+      setTimeout(() => {
+        document.getElementById(`card-${ticker}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    });
+  });
+}
+
+function _positionTip(tip) {
+  const TW = tip.offsetWidth  || 320;
+  const TH = tip.offsetHeight || 240;
+  tip.style.left = Math.round((window.innerWidth  - TW) / 2) + 'px';
+  tip.style.top  = Math.round((window.innerHeight - TH) / 2) + 'px';
+}
+
+function _makeSparkline(closes, pivot, currentPrice, buySituation) {
+  const W = 64, H = 26, PX = 2, PY = 3;
+  const n = closes.length;
+  if (!n) return '';
+  const allPrices = [...closes];
+  if (pivot) allPrices.push(pivot, pivot * 1.05);
+  if (currentPrice) allPrices.push(currentPrice);
+  const lo = Math.min(...allPrices) * 0.985;
+  const hi = Math.max(...allPrices) * 1.015;
+  const rng = hi - lo || 1;
+  const cx = i => PX + (i / Math.max(n - 1, 1)) * (W - PX * 2);
+  const cy = p => PY + (1 - (p - lo) / rng) * (H - PY * 2);
+  const pts = closes.map((c, i) => `${cx(i).toFixed(1)},${cy(c).toFixed(1)}`).join(' ');
+  let buyBand = '';
+  if (pivot) {
+    const py  = cy(pivot).toFixed(1);
+    const bzy = cy(pivot * 1.05).toFixed(1);
+    const bh  = Math.abs(Number(py) - Number(bzy));
+    const by  = Math.min(Number(py), Number(bzy));
+    buyBand = `<rect x="${PX}" y="${by.toFixed(1)}" width="${W - PX * 2}" height="${bh.toFixed(1)}" fill="#dcfce7" opacity=".65"/>`;
+  }
+  const lineColor = { in_buy_zone: '#16a34a', approaching: '#d97706', extended: '#dc2626' }[buySituation] || '#64748b';
+  const lastX = cx(n - 1), lastY = cy(closes[n - 1]);
+  const dot = `<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2" fill="${lineColor}" stroke="#fff" stroke-width="1"/>`;
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${buyBand}<polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${dot}</svg>`;
+}
+
+function _makeChartSvg(closes, pivot, currentPrice, buySituation, costPrice, sellPrices) {
+  const W = 288, H = 130, PX = 8, PY = 10;
+  const n = closes.length;
+  if (!n) return '';
+
+  const allPrices = [...closes];
+  if (pivot)        allPrices.push(pivot, pivot * 1.05);
+  if (currentPrice) allPrices.push(currentPrice);
+  if (costPrice)    allPrices.push(costPrice);
+  (sellPrices || []).forEach(p => allPrices.push(p));
+  const lo = Math.min(...allPrices) * 0.985;
+  const hi = Math.max(...allPrices) * 1.015;
+  const rng = hi - lo || 1;
+
+  const cx = i => PX + (i / Math.max(n - 1, 1)) * (W - PX * 2);
+  const cy = p => PY + (1 - (p - lo) / rng) * (H - PY * 2);
+
+  const pts   = closes.map((c, i) => `${cx(i).toFixed(1)},${cy(c).toFixed(1)}`).join(' ');
+  const lastX = cx(n - 1), lastY = cy(closes[n - 1]);
+
+  let pivotLine = '', buyBand = '', priceDot = '';
+  if (pivot) {
+    const py  = cy(pivot).toFixed(1);
+    const bzy = cy(pivot * 1.05).toFixed(1);
+    const bh  = Math.abs(Number(py) - Number(bzy));
+    const by  = Math.min(Number(py), Number(bzy));
+    buyBand   = `<rect x="${PX}" y="${by.toFixed(1)}" width="${(W - PX * 2).toFixed(1)}" height="${bh.toFixed(1)}" fill="#dcfce7" opacity=".55"/>`;
+    pivotLine = `<line x1="${PX}" y1="${py}" x2="${W - PX}" y2="${py}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,3"/>`;
+  }
+  const dotColor = { in_buy_zone:'#16a34a', approaching:'#d97706', extended:'#dc2626' }[buySituation] || '#64748b';
+  priceDot = `<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3.5" fill="${dotColor}" stroke="#fff" stroke-width="1.5"/>`;
+
+  // 個人の買値B・損切S — Moomoo風の左端フラグ + 実線
+  let personalLines = '';
+  if (costPrice) {
+    const bY = cy(costPrice);
+    const bTagW = 58;
+
+    // 買値B（青実線 + 左端フラグ）
+    personalLines += `<line x1="${bTagW + 7}" y1="${bY.toFixed(1)}" x2="${W - PX}" y2="${bY.toFixed(1)}" stroke="#2563eb" stroke-width="1.5"/>`;
+    personalLines += `<rect x="1" y="${(bY - 8).toFixed(1)}" width="${bTagW}" height="16" rx="3" fill="#2563eb"/>`;
+    personalLines += `<polygon points="${bTagW + 1},${(bY - 5).toFixed(1)} ${bTagW + 7},${bY.toFixed(1)} ${bTagW + 1},${(bY + 5).toFixed(1)}" fill="#2563eb"/>`;
+    personalLines += `<text x="${(1 + bTagW / 2).toFixed(1)}" y="${bY.toFixed(1)}" fill="#fff" font-size="8.5" font-weight="700" text-anchor="middle" dominant-baseline="middle">B $${costPrice.toFixed(1)}</text>`;
+
+  }
+
+  // 実際の売却S（Moomoo約定履歴）— 赤実線 + 左端フラグ
+  (sellPrices || []).forEach((sp, i) => {
+    const sY = cy(sp);
+    const sTagW = 52;
+    personalLines += `<line x1="${sTagW + 7}" y1="${sY.toFixed(1)}" x2="${W - PX}" y2="${sY.toFixed(1)}" stroke="#dc2626" stroke-width="1.2"/>`;
+    personalLines += `<rect x="1" y="${(sY - 7).toFixed(1)}" width="${sTagW}" height="14" rx="3" fill="#dc2626"/>`;
+    personalLines += `<polygon points="${sTagW + 1},${(sY - 4).toFixed(1)} ${sTagW + 7},${sY.toFixed(1)} ${sTagW + 1},${(sY + 4).toFixed(1)}" fill="#dc2626"/>`;
+    personalLines += `<text x="${(1 + sTagW / 2).toFixed(1)}" y="${sY.toFixed(1)}" fill="#fff" font-size="8" font-weight="700" text-anchor="middle" dominant-baseline="middle">S $${sp.toFixed(1)}</text>`;
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    ${buyBand}
+    ${personalLines}
+    <polyline points="${pts}" fill="none" stroke="#1e3a5f" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pivotLine}
+    ${priceDot}
+  </svg>`;
 }
 
 // ── MARKET UI ────────────────────────────────────────────────
@@ -1322,7 +1839,7 @@ function hideLightbox() {
 
 // ── OCR + DATA FETCH ─────────────────────────────────────────
 
-// IBD個別ページのOCRテキストからレーティングを抽出
+// OCRテキストからレーティングを抽出
 function parseStockPageText(text) {
   const result = {};
   // EPS Rating (1-99)
@@ -1340,10 +1857,10 @@ function parseStockPageText(text) {
   m = text.match(/SMR[^A-Za-z]*RATING[^A-Ea-e]*([A-Ea-e])/i);
   if (m) result.smrRating = m[1].toUpperCase();
   // A/D (Acc/Dis) Rating — capture A/A+/B/B- etc., store first letter
-  m = text.match(/(?:ACC(?:UMULATION)?[/\s]+DIS(?:TRIBUTION)?|ACC\/DIS|A\/D)\s*RATING[^A-Ea-e]*([A-Ea-e])/i);
+  m = text.match(/(?:ACC(?:UMULATION)?[\/\s]+DIS(?:TRIBUTION)?|ACC\/DIS|A\/D)\s*RATING[^A-Ea-e]*([A-Ea-e])/i);
   if (!m) m = text.match(/A\/D\s*[:\-]\s*([A-Ea-e])/i);
   if (m) result.adRating = m[1].toUpperCase();
-  // Industry Group Rank (1 to 142) — IBD format: "Industry Group Rank (1 to 142) 8"
+  // Industry Group Rank (1 to 142) — "Industry Group Rank (1 to 142) 8"
   m = text.match(/Industry\s+Group\s+Rank\s*\([^)]*\)\s*(\d{1,3})/i);
   if (!m) m = text.match(/Industry\s+Group\s+Rank[^\d]*(\d{1,3})/i);
   if (m) result.industryRank = Math.min(197, Math.max(1, parseInt(m[1])));
@@ -1397,6 +1914,27 @@ async function runVisionOcr(ticker, dataURL) {
   }
 }
 
+// Tesseract.js を使ったブラウザ内OCR（Google Visionキーがない場合のフォールバック）
+async function runTesseractOcr(ticker, dataURL) {
+  if (typeof Tesseract === 'undefined') {
+    showToast(`${ticker}: スクリーンショットを保存しました`);
+    return false;
+  }
+  showToast(`${ticker}: Tesseract OCR中...`);
+  try {
+    const result = await Tesseract.recognize(dataURL, 'eng');
+    const text = result.data.text;
+    if (!text.trim()) { showToast(`${ticker}: テキストが検出されませんでした`); return true; }
+    const filled = applyOcrText(ticker, text);
+    refreshCard(ticker);
+    showToast(filled > 0 ? `${ticker}: OCRで${filled}項目を自動入力しました` : `${ticker}: レーティングが検出されませんでした`);
+    return true;
+  } catch (e) {
+    showToast(`${ticker}: OCR失敗 — ${e.message}`, 'error');
+    return false;
+  }
+}
+
 // Yahoo Finance から財務データを自動取得（複数プロキシでフォールバック）
 async function fetchYahooData(ticker) {
   const t = encodeURIComponent(ticker);
@@ -1407,47 +1945,50 @@ async function fetchYahooData(ticker) {
     u => `https://thingproxy.freeboard.io/fetch/${u}`,
   ];
 
-  const sig = AbortSignal.timeout(15000);
-  const tryFetch = url => fetch(url, { signal: sig })
+  // AbortSignalは1リクエストごとに作成（共有するとタイムアウト時に全部中断される）
+  const tryFetch = url => fetch(url, { signal: AbortSignal.timeout(12000) })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 
-  // v10 quoteSummary — full financial data
-  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory,assetProfile';
-  const v10Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
-    const url = `https://${h}.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=${modules}`;
-    return tryFetch(fn(url)).then(j => {
-      const r = j.quoteSummary?.result?.[0];
-      if (!r) throw new Error('no v10 data');
-      return { src: 'v10', r };
-    });
-  }));
-
-  // v7 quote — lightweight; returns 52w high + basic metrics
-  const v7Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
-    const url = `https://${h}.finance.yahoo.com/v7/finance/quote?symbols=${t}`;
-    return tryFetch(fn(url)).then(j => {
-      const r = j.quoteResponse?.result?.[0];
-      if (!r) throw new Error('no v7 data');
-      return { src: 'v7', r };
-    });
-  }));
-
-  // v8 chart — 1y weekly OHLCV; compute 52w high from actual data
-  const v8Attempts = ['query2', 'query1'].flatMap(h => proxyFns.map(fn => {
-    const url = `https://${h}.finance.yahoo.com/v8/finance/chart/${t}?interval=1wk&range=1y`;
-    return tryFetch(fn(url)).then(j => {
-      const cr = j.chart?.result?.[0];
-      if (!cr) throw new Error('no v8 data');
-      return { src: 'v8', r: cr };
-    });
-  }));
-
-  let result;
-  try {
-    result = await Promise.any([...v10Attempts, ...v7Attempts, ...v8Attempts]);
-  } catch {
-    throw new Error('すべてのプロキシで失敗（Yahoo Finance blocked）');
+  // URLリストを順番に試し、最初に成功したものを返す
+  async function tryUrls(urlAttempts) {
+    for (const { url, parse } of urlAttempts) {
+      for (const fn of proxyFns) {
+        try {
+          const j = await tryFetch(fn(url));
+          const r = parse(j);
+          if (r) return r;
+        } catch (_) { /* 次のプロキシへ */ }
+      }
+    }
+    return null;
   }
+
+  const modules = 'financialData,defaultKeyStatistics,summaryDetail,incomeStatementHistory,assetProfile';
+  const urlAttempts = [
+    {
+      url: `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=${modules}`,
+      parse: j => { const r = j.quoteSummary?.result?.[0]; return r ? { src: 'v10', r } : null; },
+    },
+    {
+      url: `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${t}?modules=${modules}`,
+      parse: j => { const r = j.quoteSummary?.result?.[0]; return r ? { src: 'v10', r } : null; },
+    },
+    {
+      url: `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${t}`,
+      parse: j => { const r = j.quoteResponse?.result?.[0]; return r ? { src: 'v7', r } : null; },
+    },
+    {
+      url: `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${t}`,
+      parse: j => { const r = j.quoteResponse?.result?.[0]; return r ? { src: 'v7', r } : null; },
+    },
+    {
+      url: `https://query1.finance.yahoo.com/v8/finance/chart/${t}?interval=1wk&range=1y`,
+      parse: j => { const r = j.chart?.result?.[0]; return r ? { src: 'v8', r } : null; },
+    },
+  ];
+
+  const result = await tryUrls(urlAttempts);
+  if (!result) throw new Error('すべてのプロキシで失敗（Yahoo Finance blocked）');
 
   const data = {};
 
@@ -1466,12 +2007,26 @@ async function fetchYahooData(ticker) {
       const cut = s.indexOf('. ', 40);
       data.businessDesc = cut > 0 ? s.slice(0, cut + 1) : s.slice(0, 120) + (s.length > 120 ? '…' : '');
     }
-    if (fd.earningsGrowth?.raw != null) data.qEpsGrowth  = Math.round(fd.earningsGrowth.raw * 100);
+    // C: quarterly EPS growth (defaultKeyStatistics is more accurate than financialData)
+    if (ks.earningsQuarterlyGrowth?.raw != null) data.qEpsGrowth = Math.round(ks.earningsQuarterlyGrowth.raw * 100);
+    else if (fd.earningsGrowth?.raw != null)     data.qEpsGrowth = Math.round(fd.earningsGrowth.raw * 100);
     if (fd.revenueGrowth?.raw  != null) data.salesGrowth = Math.round(fd.revenueGrowth.raw  * 100);
     if (fd.returnOnEquity?.raw != null) data.roe         = Math.round(fd.returnOnEquity.raw  * 100);
     if (ks.floatShares?.raw    != null) data.floatShares = Math.round(ks.floatShares.raw / 1e6);
     if (ks.heldPercentInstitutions?.raw != null)
       data.instOwnership = Math.round(ks.heldPercentInstitutions.raw * 100);
+    // L: RS proxy — stock's 52w return vs S&P 52w return → mapped to 1-99 scale
+    const stock52w = ks['52WeekChange']?.raw;
+    const sp52w    = ks['SandP52WeekChange']?.raw;
+    if (stock52w != null && sp52w != null) {
+      const delta = stock52w - sp52w; // outperformance in decimal (e.g. 0.20 = 20pp ahead)
+      data.rsProxy = Math.min(99, Math.max(1, Math.round(50 + delta * 100)));
+    }
+    // S: up/down volume ratio proxy — 10-day avg vs 3-month avg
+    const vol10d = sd.averageVolume10days?.raw;
+    const vol3m  = sd.averageVolume?.raw;
+    if (vol10d != null && vol3m != null && vol3m > 0)
+      data.upDownVolRatio = +(vol10d / vol3m).toFixed(2);
     if (isl.length >= 2) {
       const recent = isl[0]?.netIncome?.raw;
       const oldest = isl[isl.length - 1]?.netIncome?.raw;
@@ -1496,6 +2051,16 @@ async function fetchYahooData(ticker) {
     if (price && high52 && high52 > 0)
       data.fromHigh52w = Math.max(0, Math.round((high52 - price) / high52 * 100));
     if (r.floatShares != null) data.floatShares = Math.round(r.floatShares / 1e6);
+    // L: RS proxy
+    const s52 = r.fiftyTwoWeekChangePercent ?? r['52WeekChange'];
+    const p52 = r.SandP52WeekChange;
+    if (s52 != null && p52 != null)
+      data.rsProxy = Math.min(99, Math.max(1, Math.round(50 + (s52 - p52) * 100)));
+    // S: volume ratio proxy
+    const v10 = r.averageVolume10days ?? r.averageDailyVolume10Day;
+    const v3m = r.averageDailyVolume3Month ?? r.averageVolume;
+    if (v10 != null && v3m != null && v3m > 0)
+      data.upDownVolRatio = +(v10 / v3m).toFixed(2);
 
   } else { // v8 chart
     const { r } = result;
@@ -1538,7 +2103,7 @@ function init() {
       <div class="setting-block">
         <label class="setting-label">Google Cloud Vision APIキー（OCR用・任意）</label>
         <p class="setting-hint">
-          IBDスクショをアップロードすると自動OCRします。<br>
+          スクリーンショットをアップロードすると自動OCRします。<br>
           <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a> で無料取得（1,000回/月）
         </p>
         <div style="display:flex;gap:6px;align-items:center;">
@@ -1668,15 +2233,235 @@ function init() {
 
   updateMarketUI();
 
-  // 前回のワーキングセッションを復元
+  // 初期タブ: スクリーナー
+  switchTab('screener');
+
+  // 前回のワーキングセッションを復元（バックグラウンドで）
   if (loadWorkingSession()) {
     renderImport();
     renderAnalyze();
     renderCompare();
     showToast('前回のリストを復元しました');
-  } else {
-    renderImport();
   }
+
+  // バックエンドJSONを非同期で読み込み（存在する場合のみ）
+  loadBackendData();
+}
+
+// ── バックエンドデータ読み込み ────────────────────────────────
+
+const BACKEND_JSON_URL = './data/canslim.json';
+
+async function loadBackendData() {
+  try {
+    console.log('[backend] fetch start:', BACKEND_JSON_URL);
+    const res = await fetch(BACKEND_JSON_URL + '?_=' + Date.now());
+    console.log('[backend] fetch status:', res.status, res.ok);
+    if (!res.ok) { console.warn('[backend] fetch failed, status', res.status); return; }
+    const json = await res.json();
+    console.log('[backend] stocks:', json.stocks?.length, 'holdings:', json.holdings?.length);
+    app.backendMeta     = { updated: json.updated };
+    app.backendData     = {};
+    app.backendHoldings = json.holdings    || [];
+    app.sellHistory     = json.sellHistory || [];
+    (json.stocks || []).forEach(s => { app.backendData[s.ticker] = s; });
+    _applyBackendStocks(json.stocks || []);
+    renderImport();
+    if (app.currentTab === 'screener') renderScreener();
+    showToast(`📡 データ更新: ${_formatUpdated(json.updated)}`);
+    // Yahoo自動取得はPythonバックエンド(update_yahoo.py)が担当 — ブラウザCORSでは不可
+  } catch (e) { console.error('[backend] error:', e); }
+}
+
+async function _autoFetchYahooForBackend() {
+  // 主要データが未取得の銘柄を対象（qEpsGrowth/rsProxy/upDownVolRatioのいずれか欠損）
+  const allKeys = Object.keys(app.backendData);
+  const need = allKeys.filter(t => {
+    const a = app.analyses[t];
+    // バックエンドJSON経由でrsProxyが既に入っている場合はスキップ
+    return a && a.rsProxy == null && a.qEpsGrowth == null;
+  });
+  if (!need.length) return;
+
+  showToast(`📊 Yahoo財務データ取得中 (${need.length}銘柄)...`);
+  let ok = 0, fail = 0;
+  for (const ticker of need) {
+    try {
+      const data = await fetchYahooData(ticker);
+      const a = app.analyses[ticker];
+      if (a) Object.assign(a, data);
+      ok++;
+    } catch (e) {
+      fail++;
+      console.warn(`Yahoo取得失敗 [${ticker}]:`, e.message);
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  saveSession();
+  if (app.currentTab === 'screener') renderScreener();
+  if (ok > 0)   showToast(`✅ Yahoo取得: ${ok}/${need.length}銘柄 完了`);
+  else if (fail) showToast(`⚠️ Yahoo取得失敗 (${fail}銘柄) — プロキシがブロック中の可能性`, 'error');
+}
+
+function _applyBackendStocks(stocks) {
+  const tickers = stocks.map(s => s.ticker);
+  if (!tickers.length) return;
+  // 既存のapp.stocksにマージ（重複排除）
+  const existing = new Set(app.stocks.map(s => s.ticker));
+  let autoRank = Math.max(0, ...app.stocks.map(s => s.rank || 0)) + 1;
+  stocks.forEach(s => {
+    if (!existing.has(s.ticker)) {
+      app.stocks.push({
+        rank: s.top50Rank ?? autoRank++,
+        ticker: s.ticker,
+        companyName: s.companyName || '',
+        compositeRating: s.compositeRating || null,
+        selected: false,
+      });
+    }
+  });
+  // 分析データに反映
+  stocks.forEach(s => {
+    const a = app.analyses[s.ticker] || (app.analyses[s.ticker] = newAnalysis(s.ticker, s.companyName || '', s.rank));
+    // レーティング
+    if (s.epsRating    != null) a.epsRating       = s.epsRating;
+    if (s.rsRating     != null) a.rsRating         = s.rsRating;
+    if (s.smrRating)            a.smrRating        = s.smrRating;
+    if (s.adRating)             a.adRating         = s.adRating;
+    if (s.compositeRating != null) a.compositeRating = s.compositeRating;
+    // Yahoo財務データ（バックエンドが取得済みの場合はそのまま使用）
+    const yahooFields = ['qEpsGrowth', 'annualEpsGrowth', 'consecutiveYears',
+                         'salesGrowth', 'roe', 'floatShares', 'upDownVolRatio',
+                         'instOwnership', 'rsProxy', 'companyName', 'businessDesc',
+                         'sector', 'industry'];
+    for (const f of yahooFields) {
+      if (s[f] != null) a[f] = s[f];
+    }
+    if (s.fromHigh52w != null) {
+      a.fromHigh52w = s.fromHigh52w;
+    } else if (s.weeklyCloses?.length) {
+      const recent = s.weeklyCloses.slice(-52);
+      const high52 = Math.max(...recent);
+      const cur    = recent[recent.length - 1];
+      if (high52 > 0) a.fromHigh52w = Math.max(0, Math.round((high52 - cur) / high52 * 100));
+    }
+    if (s.businessDesc)          a.businessDesc     = s.businessDesc;
+    // チャート → ピボット価格・パターン自動入力
+    const ch = s.chart || {};
+    if (ch.pivot != null) a.pivotPrice = ch.pivot;
+    if (ch.pattern) {
+      const PAT_MAP = {
+        cup_with_handle: 0,
+        flat_base:       1,
+        double_bottom:   2,
+        high_tight_flag: 5,
+      };
+      const idx = PAT_MAP[ch.pattern];
+      if (idx !== undefined) {
+        a.chartPatterns = a.chartPatterns || [false,false,false,false,false,false];
+        a.chartPatterns[idx] = true;
+      }
+    }
+    app.analyses[s.ticker] = a;
+  });
+  saveSession();
+}
+
+function _formatUpdated(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// インポートタブのチャート情報バッジ
+function chartBadge(ticker) {
+  const bd = app.backendData[ticker];
+  if (!bd) return '';
+  const ch = bd.chart || {};
+  const sit = ch.buySituation;
+  if (!sit || sit === 'no_pattern') return '';
+  const icons = { in_buy_zone: '🟢', approaching: '🟡', forming: '⬜', extended: '🔴' };
+  const icon = icons[sit] || '';
+  const pat  = ch.patternJp ? `${ch.patternJp} ` : '';
+  const piv  = ch.pivot ? `$${ch.pivot}` : '';
+  const pct  = ch.priceVsPivotPct != null
+    ? (ch.priceVsPivotPct >= 0 ? `+${ch.priceVsPivotPct}%` : `${ch.priceVsPivotPct}%`)
+    : '';
+  return `<span class="chart-badge chart-badge-${sit}">${icon} ${pat}${piv}${pct ? ' ('+pct+')' : ''}</span>`;
+}
+
+// ── バックエンド実行 API ─────────────────────────────────────────
+const BACKEND_API = 'http://localhost:8888';
+
+async function _runBackend() {
+  const panel  = document.getElementById('scr-run-panel');
+  const status = document.getElementById('scr-run-status');
+  const log    = document.getElementById('scr-run-log');
+  const btn    = document.getElementById('scr-run-btn');
+
+  if (!panel) return;
+  panel.style.display = '';
+  log.textContent = '';
+
+  // サーバー疎通確認
+  try {
+    await fetch(`${BACKEND_API}/api/status`, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    status.textContent = '❌ サーバー未起動';
+    status.className = 'scr-run-status scr-run-err';
+    log.textContent = '以下のコマンドでサーバーを起動してください:\n\ncd ~/Canslim/backend\nsource .venv/bin/activate\npython server.py';
+    return;
+  }
+
+  // 実行開始
+  try {
+    const r = await fetch(`${BACKEND_API}/api/run`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+    if (r.status === 409) {
+      status.textContent = '⏳ 実行中...';
+      status.className = 'scr-run-status scr-run-running';
+    } else if (!r.ok) {
+      throw new Error(`HTTP ${r.status}`);
+    } else {
+      status.textContent = '⏳ 実行中...';
+      status.className = 'scr-run-status scr-run-running';
+      btn.disabled = true;
+    }
+  } catch (e) {
+    status.textContent = `❌ 実行失敗: ${e.message}`;
+    status.className = 'scr-run-status scr-run-err';
+    return;
+  }
+
+  // ポーリングでログを取得
+  let lastLen = 0;
+  const poll = setInterval(async () => {
+    try {
+      const r = await fetch(`${BACKEND_API}/api/status`, { signal: AbortSignal.timeout(3000) });
+      const s = await r.json();
+
+      // ログ差分を追記
+      const lines = s.log || [];
+      if (lines.length > lastLen) {
+        log.textContent += lines.slice(lastLen).join('\n') + '\n';
+        log.scrollTop = log.scrollHeight;
+        lastLen = lines.length;
+      }
+
+      if (!s.running) {
+        clearInterval(poll);
+        btn.disabled = false;
+        if (s.exitCode === 0) {
+          status.textContent = `✅ 完了（${s.stocks}銘柄）`;
+          status.className = 'scr-run-status scr-run-ok';
+          // JSON を再読み込みしてスクリーナーを更新
+          await loadBackendData();
+        } else {
+          status.textContent = `❌ エラー (exit ${s.exitCode})`;
+          status.className = 'scr-run-status scr-run-err';
+        }
+      }
+    } catch (_) { /* ネットワーク一時エラーは無視 */ }
+  }, 1500);
 }
 
 document.addEventListener('DOMContentLoaded', init);

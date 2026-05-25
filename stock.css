@@ -503,7 +503,7 @@ body {
 
 .stock-card-body { padding: 16px; flex: 1; display: flex; flex-direction: column; gap: 16px; }
 
-/* IBD Upload inside card */
+/* Screenshot upload inside card */
 .card-upload {
   border: 1.5px dashed var(--border);
   border-radius: 8px;
@@ -1225,6 +1225,21 @@ details[open] .ocr-paste-summary::before { content: '▼ '; }
   flex-shrink: 0;
 }
 .stock-item-holding { background: #f0fdf4; }
+
+/* チャートバッジ */
+.chart-badge {
+  font-size: .65rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.chart-badge-in_buy_zone { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.chart-badge-approaching  { background: #fef9c3; color: #713f12; border: 1px solid #fde68a; }
+.chart-badge-forming      { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.chart-badge-extended     { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .holdings-section {
   margin-top: 20px;
   border: 1px solid var(--border);
@@ -1282,3 +1297,351 @@ details[open] .ocr-paste-summary::before { content: '▼ '; }
   margin-bottom: 8px;
 }
 #holdings-img-thumb { cursor: zoom-in; border-radius: 6px; }
+
+/* ============================================================
+   SCREENER TAB
+   ============================================================ */
+.screener-empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--text-2);
+}
+.screener-empty .empty-icon { font-size: 2.4rem; margin-bottom: 12px; }
+.screener-empty p { margin-bottom: 16px; line-height: 1.6; }
+
+.screener-empty-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 0 auto 4px;
+  max-width: 480px;
+  text-align: left;
+  font-size: .83rem;
+  line-height: 1.7;
+  color: var(--text);
+}
+.screener-empty-warn {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+.screener-empty-steps {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.screener-empty-step {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-size: .8rem;
+  line-height: 1.6;
+}
+.screener-empty-step code {
+  display: inline-block;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: .74rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
+  word-break: break-all;
+}
+.screener-empty-link {
+  color: var(--primary);
+  font-size: .78rem;
+  word-break: break-all;
+}
+
+.scr-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.scr-updated { font-size: .8rem; color: var(--text-2); flex: 1; }
+
+/* バックエンド実行パネル */
+.scr-run-panel {
+  background: #0f172a;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.scr-run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #1e293b;
+}
+.scr-run-status {
+  font-size: .78rem;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.scr-run-status.scr-run-running { color: #60a5fa; }
+.scr-run-status.scr-run-ok      { color: #4ade80; }
+.scr-run-status.scr-run-err     { color: #f87171; }
+.scr-run-close {
+  background: none; border: none; color: #64748b;
+  cursor: pointer; font-size: .9rem; padding: 2px 6px;
+  border-radius: 4px; line-height: 1;
+}
+.scr-run-close:hover { color: #cbd5e1; background: #334155; }
+.scr-run-log {
+  padding: 10px 14px;
+  font-size: .72rem;
+  line-height: 1.6;
+  color: #94a3b8;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.scr-section { margin-bottom: 16px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+
+.scr-section-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: .85rem;
+  font-weight: 700;
+}
+.sit-buy  .scr-section-hd { background: #dcfce7; color: #166534; }
+.sit-near .scr-section-hd { background: #fef9c3; color: #854d0e; }
+.sit-form .scr-section-hd { background: #f1f5f9; color: var(--text-2); }
+.sit-ext  .scr-section-hd { background: #fee2e2; color: #991b1b; }
+
+.scr-cnt {
+  font-size: .75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(0,0,0,.08);
+}
+
+.scr-rows { background: var(--card); }
+
+.scr-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .15s;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.scr-row:last-child { border-bottom: none; }
+.scr-row:hover { background: #f8fafc; }
+.scr-row:active { background: #f1f5f9; }
+
+.scr-ticker {
+  font-weight: 800;
+  font-size: .95rem;
+  color: var(--primary);
+  min-width: 52px;
+  flex-shrink: 0;
+}
+.scr-pat {
+  font-size: .72rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-radius: 20px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.scr-weeks {
+  font-size: .72rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.scr-spacer { flex: 1; min-width: 4px; }
+.scr-price  { font-size: .82rem; color: var(--text-2); min-width: 58px; text-align: right; flex-shrink: 0; }
+.scr-arrow  { font-size: .7rem; color: var(--text-3); flex-shrink: 0; }
+.scr-pivot  { font-size: .82rem; font-weight: 600; min-width: 58px; flex-shrink: 0; }
+.scr-pct    { font-size: .82rem; font-weight: 700; min-width: 46px; text-align: right; flex-shrink: 0; }
+.scr-pct-pos  { color: var(--success); }
+.scr-pct-near { color: var(--warning); }
+.scr-pct-neg  { color: var(--text-2); }
+
+/* Top50バッジ（金色） */
+.scr-top50 {
+  font-size: .68rem; font-weight: 800; padding: 1px 6px;
+  border-radius: 4px; background: #fef3c7; color: #92400e;
+  white-space: nowrap; border: 1px solid #fbbf24; flex-shrink: 0;
+}
+.scr-top50-rank {
+  font-size: .68rem; color: #92400e; white-space: nowrap; flex-shrink: 0;
+}
+
+/* 企業名 */
+.scr-cname {
+  font-size: .68rem; color: var(--text-2); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 140px; flex-shrink: 1;
+}
+/* セクターチップ */
+.scr-sector {
+  font-size: .65rem; padding: 2px 6px; border-radius: 4px;
+  white-space: nowrap; flex-shrink: 0; font-weight: 600;
+  border: 1px solid rgba(0,0,0,.06);
+}
+
+/* 保有バッジ */
+.scr-held {
+  font-size: .68rem; font-weight: 700; padding: 1px 6px;
+  border-radius: 4px; background: #dbeafe; color: #1d4ed8;
+  white-space: nowrap; flex-shrink: 0;
+}
+
+/* B/S シグナルバッジ */
+.scr-bs {
+  font-size: .72rem; font-weight: 800; padding: 1px 6px;
+  border-radius: 4px; white-space: nowrap; flex-shrink: 0;
+}
+.bs-buy  { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+.bs-near { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+.bs-sell { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+
+/* インラインミニチャート */
+.scr-mini { flex-shrink: 0; line-height: 0; border-radius: 3px; overflow: hidden; background: #f8fafc; }
+
+/* 保有銘柄セクション */
+.scr-section-holdings .scr-section-hd { background: #eff6ff; color: #1e40af; }
+.scr-qty    { font-size: .78rem; color: var(--text-2); white-space: nowrap; flex-shrink: 0; }
+.scr-cost   { font-size: .78rem; font-weight: 600; min-width: 52px; text-align: right; flex-shrink: 0; }
+.scr-mktval { font-size: .78rem; color: var(--text-3); min-width: 40px; text-align: right; flex-shrink: 0; }
+.scr-label  { font-size: .68rem; color: var(--text-3); white-space: nowrap; flex-shrink: 0; }
+.scr-check  { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; accent-color: var(--primary); }
+.scr-select-bar {
+  position: sticky; bottom: 0; background: var(--primary); color: #fff;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; font-size: .9rem; font-weight: 600;
+  box-shadow: 0 -2px 12px rgba(0,0,0,.2); gap: 12px;
+}
+.scr-select-bar .btn-white {
+  background: #fff; color: var(--primary); border: none;
+  padding: 6px 16px; border-radius: 8px; font-weight: 700; cursor: pointer;
+}
+
+/* CAN SLIM 7項目カラーバー（スクリーナー行） */
+.scr-crit-bar { display: flex; gap: 1px; flex-shrink: 0; align-items: center; }
+.scr-crit-dot {
+  font-size: 6.5px; font-weight: 800; width: 13px; height: 13px;
+  border-radius: 2px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: default;
+}
+
+/* CAN SLIM 総合スコアバッジ（スクリーナー行） */
+.scr-score-badge {
+  font-size: .72rem; font-weight: 800; padding: 2px 0;
+  border-radius: 20px; white-space: nowrap; flex-shrink: 0;
+  min-width: 32px; text-align: center;
+}
+
+/* 圏外（下降トレンド）セクション */
+.sit-down .scr-section-hd { background: #f1f5f9; color: #64748b; }
+.sit-down .scr-row         { opacity: .55; }
+.sit-down .scr-row:hover   { opacity: .8; }
+
+/* ── チャートツールチップ ── */
+.scr-tip {
+  position: fixed;
+  z-index: 600;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  padding: 12px 14px;
+  width: 320px;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+.scr-tip-hidden { opacity: 0; pointer-events: none; }
+
+.scr-tip-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.scr-tip-ticker {
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--primary);
+}
+.scr-tip-pat {
+  font-size: .7rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.scr-tip-cname {
+  font-size: .72rem; font-weight: 600; color: var(--text);
+  margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.scr-tip-desc {
+  font-size: .68rem; color: var(--text-2); line-height: 1.4;
+  margin-bottom: 6px; max-width: 280px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.scr-tip-svg {
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f8fafc;
+  margin-bottom: 8px;
+  line-height: 0;
+}
+.scr-tip-info {
+  display: flex;
+  gap: 12px;
+  font-size: .78rem;
+  color: var(--text-2);
+  align-items: center;
+}
+.scr-tip-info b { color: var(--text); }
+.scr-tip-top50 {
+  font-size: .68rem; font-weight: 800; padding: 1px 6px;
+  border-radius: 4px; background: #fef3c7; color: #92400e;
+  border: 1px solid #fbbf24;
+}
+.scr-tip-ratings {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-size: .72rem; color: var(--text-2);
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.scr-tip-ratings b { color: var(--text); font-weight: 700; }
+
+/* tooltip — CAN SLIM スコア */
+.scr-tip-total {
+  margin-left: auto; font-size: .72rem; font-weight: 800;
+  padding: 2px 7px; border-radius: 20px; border: 1.5px solid currentColor;
+}
+.scr-tip-canslim {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.scr-tip-crit {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1px; min-width: 28px;
+}
+.scr-tip-crit-lbl {
+  font-size: .75rem; font-weight: 800;
+  padding: 2px 5px; border-radius: 4px; width: 100%; text-align: center;
+  min-width: 20px; display: block;
+}
+.scr-tip-crit small {
+  font-size: .65rem; color: var(--text-2);
+}

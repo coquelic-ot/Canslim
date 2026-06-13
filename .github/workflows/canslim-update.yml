@@ -1,0 +1,61 @@
+name: CAN SLIM 毎朝データ更新
+
+on:
+  schedule:
+    - cron: '0 0 * * 2-6'   # 火〜土 00:00 UTC = 朝9:00 JST（月〜金の相場後）
+  workflow_dispatch:          # GitHub画面から手動実行も可能
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: バックエンドコードをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: claude/oneill-stock-selector-ID7mD
+          fetch-depth: 0
+
+      - name: Python 3.11 セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 依存パッケージインストール
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: CAN SLIM バックエンド実行
+        env:
+          IBD_EMAIL:    ${{ secrets.IBD_EMAIL }}
+          IBD_PASSWORD: ${{ secrets.IBD_PASSWORD }}
+        run: |
+          cd backend
+          python main.py config.yaml
+
+      - name: data/canslim.json を gh-pages に反映
+        run: |
+          cp backend/output/canslim.json /tmp/canslim.json
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          git fetch origin gh-pages
+          git checkout gh-pages
+
+          mkdir -p data
+          cp /tmp/canslim.json data/canslim.json
+
+          git add data/canslim.json
+          if git diff --staged --quiet; then
+            echo "変更なし — スキップ"
+          else
+            git commit -m "Auto-update: CAN SLIM $(date +'%Y-%m-%d %H:%M UTC')"
+            git push origin gh-pages
+          fi

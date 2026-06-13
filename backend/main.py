@@ -18,8 +18,30 @@ import chart_analyzer
 
 
 def load_config(path='config.yaml') -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        cfg = {}
+
+    cfg.setdefault('ibd',      {})
+    cfg.setdefault('github',   {})
+    cfg.setdefault('settings', {})
+
+    # 環境変数で上書き（GitHub Actions用）
+    for key, env in [('email', 'IBD_EMAIL'), ('password', 'IBD_PASSWORD')]:
+        if os.getenv(env):
+            cfg['ibd'][key] = os.getenv(env)
+
+    cfg['settings'].setdefault('history_weeks',            52)
+    cfg['settings'].setdefault('min_breakout_volume_pct',  40)
+    cfg['settings'].setdefault('benchmark',             '^GSPC')
+
+    # GitHub Actions では直接 gh-pages に push するので API upload をスキップ
+    if os.getenv('GITHUB_ACTIONS'):
+        cfg['github']['token'] = ''
+
+    return cfg
 
 
 def run(config: dict):

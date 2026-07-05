@@ -6,10 +6,13 @@
   <meta name="theme-color" content="#1e3a5f" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
+  <!-- bfcache無効化: unloadリスナーがあるページはiOS SafariがbfcacheしないためTesseract先祖返り防止 -->
   <script>
+    // Layer 1: pageshow fires on bfcache restore — setTimeout escapes iOS blocking
     window.addEventListener('pageshow', function(e) {
       if (e.persisted) setTimeout(function() { window.location.replace(location.href); }, 50);
     });
+    // Layer 2: navigation type back_forward on DOMContentLoaded (non-bfcache stale guard)
     document.addEventListener('DOMContentLoaded', function() {
       try {
         var nav = performance.getEntriesByType('navigation')[0];
@@ -18,6 +21,7 @@
     });
     window.addEventListener('unload', function(){});
     if ('serviceWorker' in navigator) {
+      // Layer 3: SW sends RELOAD on activate — catches pages queued in bfcache
       navigator.serviceWorker.addEventListener('message', function(e) {
         if (e.data && e.data.type === 'RELOAD') window.location.replace(location.href);
       });
@@ -67,11 +71,13 @@
   <div id="tab-history"  class="tab-panel"></div>
 </main>
 
+<!-- モーダルはすべてstock.jsで描画 -->
 <div class="modal-overlay hidden" id="settings-modal"></div>
 <div class="modal-overlay hidden" id="market-modal"></div>
 
 <div class="toast hidden" id="toast"></div>
 
+<!-- Lightbox -->
 <div class="lightbox hidden" id="lightbox">
   <div class="lightbox-bg" id="lightbox-bg"></div>
   <img class="lightbox-img" id="lightbox-img" src="" alt="" />
@@ -79,5 +85,169 @@
 </div>
 
 <script src="stock.js?v=41"></script>
+<script>
+/* ── スクリーナー上書きパッチ ───────────────────────────────────
+   gh-pages の stock.js が古い版のため、renderScreener と
+   loadBackendData を新しいバックエンドJSON対応版で差し替える。
+   DOMContentLoaded より前に実行されるため、init() が switchTab()
+   → renderScreener() を呼んだ時点でこの実装が使われる。
+──────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  /* app.backendData が旧 stock.js に存在しない場合に備えて初期化 */
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.app) {
+      if (window.app.backendData === undefined) window.app.backendData = {};
+      if (window.app.backendMeta === undefined) window.app.backendMeta = null;
+    }
+    window.loadBackendData();
+  });
+
+  /* ── バックエンドJSON読み込み ── */
+  window.loadBackendData = async function () {
+    try {
+      const res = await fetch('./data/canslim.json?_=' + Date.now());
+      if (!res.ok) return;
+      const json = await res.json();
+      if (!window.app) return;
+      window.app.backendMeta = { updated: json.updated };
+      window.app.backendData = {};
+      (json.stocks || []).forEach(function (s) {
+        window.app.backendData[s.ticker] = s;
+      });
+      /* 旧 stock.js の補助関数が存在すれば流用 */
+      if (typeof _applyBackendStocks === 'function') _applyBackendStocks(json.stocks || []);
+      if (typeof renderImport        === 'function') renderImport();
+      if (window.app.currentTab === 'screener') window.renderScreener();
+      if (typeof showToast           === 'function') showToast('📡 データ更新: ' + _fmtUpd(json.updated));
+    } catch (_) { /* data/canslim.json 未作成時は無視 */ }
+  };
+
+  /* ── スクリーナータブ描画 ── */
+  window.renderScreener = function () {
+    const panel = document.getElementById('tab-screener');
+    if (!panel) return;
+
+    const data   = (window.app && window.app.backendData) || {};
+    const stocks = Object.values(data);
+
+    if (!stocks.length) {
+      panel.innerHTML = `
+        <div class="section">
+          <div class="section-header">
+            <h2>🔍 スクリーナー</h2>
+            <p>IBD50銘柄のチャートパターン・CAN SLIMスコア一覧</p>
+          </div>
+          <div class="empty-state" style="padding:48px 20px;">
+            <div class="empty-icon">📡</div>
+            <p style="font-weight:600;margin-bottom:6px;">データがまだ取得されていません</p>
+            <p style="font-size:.78rem;color:var(--text-3);line-height:1.6;">
+              GitHub Actionsが毎朝自動実行され<br>IBD50のチャート分析データが表示されます
+            </p>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const sitPri = { in_buy_zone: 3, approaching: 2, forming: 1, extended: 0 };
+    const sorted = [...stocks].sort(function (a, b) {
+      const ap = sitPri[a.chart && a.chart.buySituation] ?? -1;
+      const bp = sitPri[b.chart && b.chart.buySituation] ?? -1;
+      return ap !== bp ? bp - ap : (b.compositeRating || 0) - (a.compositeRating || 0);
+    });
+
+    const meta = window.app && window.app.backendMeta;
+    panel.innerHTML = `
+      <div class="section">
+        <div class="section-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h2>🔍 スクリーナー</h2>
+            <p>IBD50 ${stocks.length}銘柄${meta ? ' — ' + _fmtUpd(meta.updated) + '更新' : ''}</p>
+          </div>
+          <button class="btn btn-sm btn-ghost" id="scr-reload">🔄 再読み込み</button>
+        </div>
+        <div class="screener-grid">
+          ${sorted.map(_scrCard).join('')}
+        </div>
+      </div>`;
+
+    document.getElementById('scr-reload')?.addEventListener('click', function () {
+      window.loadBackendData();
+      if (typeof showToast === 'function') showToast('データを再取得中...');
+    });
+
+    panel.querySelectorAll('[data-scr-analyze]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const ticker = btn.dataset.scrAnalyze;
+        if (window.app) {
+          const s = window.app.stocks && window.app.stocks.find(function (x) { return x.ticker === ticker; });
+          if (s) s.selected = true;
+          if (window.app.analyses && !window.app.analyses[ticker] && typeof newAnalysis === 'function')
+            window.app.analyses[ticker] = newAnalysis(ticker);
+        }
+        if (typeof switchTab === 'function') switchTab('analyze');
+      });
+    });
+  };
+
+  /* ── カードHTML生成 ── */
+  function _scrCard(s) {
+    const ch    = s.chart || {};
+    const sit   = ch.buySituation || '';
+    const icons  = { in_buy_zone: '🟢', approaching: '🟡', forming: '⬜', extended: '🔴' };
+    const labels = { in_buy_zone: '買いゾーン', approaching: '接近中', forming: '形成中', extended: '超過' };
+    const icon  = icons[sit]  || '—';
+    const lbl   = labels[sit] || 'パターンなし';
+    const pivot = ch.pivot ? '$' + ch.pivot.toFixed(2) : '—';
+    const pct   = ch.priceVsPivotPct != null
+      ? (ch.priceVsPivotPct >= 0 ? '+' + ch.priceVsPivotPct + '%' : ch.priceVsPivotPct + '%') : '';
+    const held  = window.app && window.app.holdings && window.app.holdings.has(s.ticker);
+
+    return `
+      <div class="screener-card">
+        <div class="screener-card-top">
+          <span class="stock-card-rank">#${s.rank}</span>
+          <span class="stock-card-ticker">${_xe(s.ticker)}</span>
+          ${held ? '<span class="badge-holding">保有中</span>' : ''}
+          <span class="scr-sit-badge scr-sit-${sit}">${icon} ${lbl}</span>
+        </div>
+        <div class="screener-card-body">
+          <div class="screener-pattern-row">
+            ${ch.patternJp
+              ? '<span class="screener-pattern-name">' + _xe(ch.patternJp) + '</span>'
+              : '<span class="screener-no-pattern">パターン未検出</span>'}
+            ${pivot !== '—' ? '<span class="screener-pivot">ピボット ' + pivot + (pct ? ' (' + pct + ')' : '') + '</span>' : ''}
+          </div>
+          <div class="screener-ratings">
+            ${_chip('総合', s.compositeRating)}
+            ${_chip('EPS',  s.epsRating)}
+            ${_chip('RS',   s.rsRating)}
+            ${s.smrRating ? _chip('SMR', s.smrRating) : ''}
+          </div>
+          <button class="btn btn-sm btn-primary scr-analyze-btn" data-scr-analyze="${_xe(s.ticker)}">詳細分析 →</button>
+        </div>
+      </div>`;
+  }
+
+  function _chip(label, val) {
+    if (val == null || val === '') return '';
+    const n   = typeof val === 'number' ? val : null;
+    const cls = n == null ? '' : n >= 80 ? 'chip-high' : n >= 60 ? 'chip-mid' : 'chip-low';
+    return '<span class="scr-chip ' + cls + '"><small>' + label + '</small>' + val + '</span>';
+  }
+
+  function _fmtUpd(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' '
+      + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function _xe(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+})();
+</script>
 </body>
 </html>

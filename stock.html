@@ -32,7 +32,7 @@
     }
   </script>
   <title>CAN SLIM 銘柄チェッカー</title>
-  <link rel="stylesheet" href="stock.css?v=20" />
+  <link rel="stylesheet" href="stock.css?v=21" />
 </head>
 <body>
 
@@ -51,7 +51,8 @@
     </div>
   </div>
   <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="import">📥 インポート</button>
+    <button class="tab-btn active" data-tab="screener">🔍 スクリーナー</button>
+    <button class="tab-btn" data-tab="import">📥 インポート</button>
     <button class="tab-btn" data-tab="analyze">📊 分析</button>
     <button class="tab-btn" data-tab="compare">⚖ 比較</button>
     <button class="tab-btn" data-tab="history">📋 履歴</button>
@@ -59,10 +60,11 @@
 </header>
 
 <main class="main">
-  <div id="tab-import"  class="tab-panel active"></div>
-  <div id="tab-analyze" class="tab-panel"></div>
-  <div id="tab-compare" class="tab-panel"></div>
-  <div id="tab-history" class="tab-panel"></div>
+  <div id="tab-screener" class="tab-panel active"></div>
+  <div id="tab-import"   class="tab-panel"></div>
+  <div id="tab-analyze"  class="tab-panel"></div>
+  <div id="tab-compare"  class="tab-panel"></div>
+  <div id="tab-history"  class="tab-panel"></div>
 </main>
 
 <div class="modal-overlay hidden" id="settings-modal"></div>
@@ -77,12 +79,5 @@
 </div>
 
 <script src="stock.js?v=41"></script>
-<script>
-// screenerタブ廃止パッチ: 旧stock.jsがscreenerを参照しないよう上書き
-window.renderScreener = function() {
-  if (typeof switchTab === 'function') switchTab('import');
-};
-if (window.app) window.app.currentTab = 'import';
-</script>
 </body>
 </html>

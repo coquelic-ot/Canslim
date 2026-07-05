@@ -6,13 +6,10 @@
   <meta name="theme-color" content="#1e3a5f" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
-  <!-- bfcache無効化: unloadリスナーがあるページはiOS SafariがbfcacheしないためTesseract先祖返り防止 -->
   <script>
-    // Layer 1: pageshow fires on bfcache restore — setTimeout escapes iOS blocking
     window.addEventListener('pageshow', function(e) {
       if (e.persisted) setTimeout(function() { window.location.replace(location.href); }, 50);
     });
-    // Layer 2: navigation type back_forward on DOMContentLoaded (non-bfcache stale guard)
     document.addEventListener('DOMContentLoaded', function() {
       try {
         var nav = performance.getEntriesByType('navigation')[0];
@@ -21,7 +18,6 @@
     });
     window.addEventListener('unload', function(){});
     if ('serviceWorker' in navigator) {
-      // Layer 3: SW sends RELOAD on activate — catches pages queued in bfcache
       navigator.serviceWorker.addEventListener('message', function(e) {
         if (e.data && e.data.type === 'RELOAD') window.location.replace(location.href);
       });
@@ -36,7 +32,7 @@
     }
   </script>
   <title>CAN SLIM 銘柄チェッカー</title>
-  <link rel="stylesheet" href="stock.css?v=19" />
+  <link rel="stylesheet" href="stock.css?v=20" />
 </head>
 <body>
 
@@ -55,8 +51,7 @@
     </div>
   </div>
   <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="screener">🔍 スクリーナー</button>
-    <button class="tab-btn" data-tab="import">📥 インポート</button>
+    <button class="tab-btn active" data-tab="import">📥 インポート</button>
     <button class="tab-btn" data-tab="analyze">📊 分析</button>
     <button class="tab-btn" data-tab="compare">⚖ 比較</button>
     <button class="tab-btn" data-tab="history">📋 履歴</button>
@@ -64,27 +59,30 @@
 </header>
 
 <main class="main">
-  <div id="tab-import"   class="tab-panel"></div>
-  <div id="tab-analyze"  class="tab-panel"></div>
-  <div id="tab-screener" class="tab-panel active"></div>
-  <div id="tab-compare"  class="tab-panel"></div>
-  <div id="tab-history"  class="tab-panel"></div>
+  <div id="tab-import"  class="tab-panel active"></div>
+  <div id="tab-analyze" class="tab-panel"></div>
+  <div id="tab-compare" class="tab-panel"></div>
+  <div id="tab-history" class="tab-panel"></div>
 </main>
 
-<!-- モーダルはすべてstock.jsで描画 -->
 <div class="modal-overlay hidden" id="settings-modal"></div>
 <div class="modal-overlay hidden" id="market-modal"></div>
 
 <div class="toast hidden" id="toast"></div>
 
-<!-- Lightbox -->
 <div class="lightbox hidden" id="lightbox">
   <div class="lightbox-bg" id="lightbox-bg"></div>
   <img class="lightbox-img" id="lightbox-img" src="" alt="" />
   <button class="lightbox-close" id="lightbox-close">✕</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="stock.js?v=40"></script>
+<script src="stock.js?v=41"></script>
+<script>
+// screenerタブ廃止パッチ: 旧stock.jsがscreenerを参照しないよう上書き
+window.renderScreener = function() {
+  if (typeof switchTab === 'function') switchTab('import');
+};
+if (window.app) window.app.currentTab = 'import';
+</script>
 </body>
 </html>

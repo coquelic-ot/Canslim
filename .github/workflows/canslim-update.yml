@@ -39,7 +39,7 @@ jobs:
           cd backend
           python main.py config.yaml
 
-      - name: data/canslim.json を gh-pages に反映
+      - name: gh-pages に反映（フロントエンド + データ）
         run: |
           cp backend/output/canslim.json /tmp/canslim.json
 
@@ -49,10 +49,14 @@ jobs:
           git fetch origin gh-pages
           git checkout gh-pages
 
+          # フロントエンドファイルを feature ブランチから同期
+          git checkout origin/claude/oneill-stock-selector-ID7mD -- stock.html stock.css stock.js sw.js
+
+          # データJSON
           mkdir -p data
           cp /tmp/canslim.json data/canslim.json
 
-          git add data/canslim.json
+          git add stock.html stock.css stock.js sw.js data/canslim.json
           if git diff --staged --quiet; then
             echo "変更なし — スキップ"
           else

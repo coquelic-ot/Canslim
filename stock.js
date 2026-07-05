@@ -1274,10 +1274,118 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
   app.currentTab = name;
 
-  if      (name === 'import')  renderImport();
-  else if (name === 'analyze') renderAnalyze();
-  else if (name === 'compare') renderCompare();
-  else if (name === 'history') renderHistory();
+  if      (name === 'screener') renderScreener();
+  else if (name === 'import')   renderImport();
+  else if (name === 'analyze')  renderAnalyze();
+  else if (name === 'compare')  renderCompare();
+  else if (name === 'history')  renderHistory();
+}
+
+// ── RENDERING: SCREENER TAB ──────────────────────────────────
+function renderScreener() {
+  const panel = document.getElementById('tab-screener');
+  if (!panel) return;
+
+  const stocks = Object.values(app.backendData);
+
+  if (!stocks.length) {
+    panel.innerHTML = `
+      <div class="section">
+        <div class="section-header">
+          <h2>🔍 スクリーナー</h2>
+          <p>IBD50銘柄のチャートパターン・CAN SLIMスコア一覧</p>
+        </div>
+        <div class="empty-state" style="padding:48px 20px;">
+          <div class="empty-icon">📡</div>
+          <p style="font-weight:600;margin-bottom:6px;">データがまだ取得されていません</p>
+          <p style="font-size:.78rem;color:var(--text-3);line-height:1.6;">
+            GitHub Actionsが毎朝自動実行され<br>IBD50のチャート分析データが表示されます
+          </p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const sitPriority = { in_buy_zone:3, approaching:2, forming:1, extended:0 };
+  const sorted = [...stocks].sort((a,b) => {
+    const ap = sitPriority[a.chart?.buySituation] ?? -1;
+    const bp = sitPriority[b.chart?.buySituation] ?? -1;
+    if (ap !== bp) return bp - ap;
+    return (b.compositeRating||0) - (a.compositeRating||0);
+  });
+
+  panel.innerHTML = `
+    <div class="section">
+      <div class="section-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+        <div>
+          <h2>🔍 スクリーナー</h2>
+          <p>IBD50 ${stocks.length}銘柄${app.backendMeta ? ` — ${_formatUpdated(app.backendMeta.updated)}更新` : ''}</p>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="scr-reload">🔄 再読み込み</button>
+      </div>
+      <div class="screener-grid">
+        ${sorted.map(s => _screenerCardHtml(s)).join('')}
+      </div>
+    </div>`;
+
+  document.getElementById('scr-reload')?.addEventListener('click', () => {
+    loadBackendData();
+    showToast('データを再取得中...');
+  });
+
+  panel.querySelectorAll('[data-scr-analyze]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ticker = btn.dataset.scrAnalyze;
+      const s = app.stocks.find(x => x.ticker === ticker);
+      if (s) s.selected = true;
+      if (!app.analyses[ticker]) app.analyses[ticker] = newAnalysis(ticker);
+      switchTab('analyze');
+    });
+  });
+}
+
+function _screenerCardHtml(s) {
+  const ch  = s.chart || {};
+  const sit = ch.buySituation || '';
+  const sitIcons  = { in_buy_zone:'🟢', approaching:'🟡', forming:'⬜', extended:'🔴' };
+  const sitLabels = { in_buy_zone:'買いゾーン', approaching:'接近中', forming:'形成中', extended:'超過' };
+  const icon  = sitIcons[sit]  || '—';
+  const label = sitLabels[sit] || 'パターンなし';
+  const pivot = ch.pivot ? `$${ch.pivot.toFixed(2)}` : '—';
+  const pct   = ch.priceVsPivotPct != null
+    ? (ch.priceVsPivotPct >= 0 ? `+${ch.priceVsPivotPct}%` : `${ch.priceVsPivotPct}%`) : '';
+
+  return `
+    <div class="screener-card">
+      <div class="screener-card-top">
+        <span class="stock-card-rank">#${s.rank}</span>
+        <span class="stock-card-ticker">${esc(s.ticker)}</span>
+        ${app.holdings.has(s.ticker) ? '<span class="badge-holding">保有中</span>' : ''}
+        <span class="scr-sit-badge scr-sit-${sit}">${icon} ${label}</span>
+      </div>
+      <div class="screener-card-body">
+        <div class="screener-pattern-row">
+          ${ch.patternJp
+            ? `<span class="screener-pattern-name">${esc(ch.patternJp)}</span>`
+            : '<span class="screener-no-pattern">パターン未検出</span>'}
+          ${pivot !== '—' ? `<span class="screener-pivot">ピボット ${pivot}${pct ? ` (${pct})` : ''}</span>` : ''}
+        </div>
+        <div class="screener-ratings">
+          ${_ratingChip('総合', s.compositeRating)}
+          ${_ratingChip('EPS', s.epsRating)}
+          ${_ratingChip('RS', s.rsRating)}
+          ${s.smrRating ? _ratingChip('SMR', s.smrRating) : ''}
+        </div>
+        <button class="btn btn-sm btn-primary scr-analyze-btn" data-scr-analyze="${esc(s.ticker)}">詳細分析 →</button>
+      </div>
+    </div>`;
+}
+
+function _ratingChip(label, val) {
+  if (val == null || val === '') return '';
+  const n = typeof val === 'number' ? val : null;
+  const cls = n == null ? '' : n >= 80 ? 'chip-high' : n >= 60 ? 'chip-mid' : 'chip-low';
+  return `<span class="scr-chip ${cls}"><small>${label}</small>${val}</span>`;
 }
 
 // ── MARKET UI ────────────────────────────────────────────────
@@ -1681,6 +1789,9 @@ function init() {
     renderImport();
   }
 
+  // スクリーナータブを初期表示
+  switchTab('screener');
+
   // バックエンドJSONを非同期で読み込み（存在する場合のみ）
   loadBackendData();
 }
@@ -1700,6 +1811,7 @@ async function loadBackendData() {
     // IBD50銘柄を自動インポート
     _applyBackendStocks(json.stocks || []);
     renderImport();
+    if (app.currentTab === 'screener') renderScreener();
     showToast(`📡 データ更新: ${_formatUpdated(json.updated)}`);
   } catch (_) { /* バックエンドJSONが未作成の場合は無視 */ }
 }

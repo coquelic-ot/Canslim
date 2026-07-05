@@ -55,7 +55,8 @@
     </div>
   </div>
   <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="import">📥 インポート</button>
+    <button class="tab-btn active" data-tab="screener">🔍 スクリーナー</button>
+    <button class="tab-btn" data-tab="import">📥 インポート</button>
     <button class="tab-btn" data-tab="analyze">📊 分析</button>
     <button class="tab-btn" data-tab="compare">⚖ 比較</button>
     <button class="tab-btn" data-tab="history">📋 履歴</button>
@@ -63,10 +64,11 @@
 </header>
 
 <main class="main">
-  <div id="tab-import"  class="tab-panel active"></div>
-  <div id="tab-analyze" class="tab-panel"></div>
-  <div id="tab-compare" class="tab-panel"></div>
-  <div id="tab-history" class="tab-panel"></div>
+  <div id="tab-screener" class="tab-panel active"></div>
+  <div id="tab-import"   class="tab-panel"></div>
+  <div id="tab-analyze"  class="tab-panel"></div>
+  <div id="tab-compare"  class="tab-panel"></div>
+  <div id="tab-history"  class="tab-panel"></div>
 </main>
 
 <!-- モーダルはすべてstock.jsで描画 -->
@@ -82,6 +84,6 @@
   <button class="lightbox-close" id="lightbox-close">✕</button>
 </div>
 
-<script src="stock.js?v=12"></script>
+<script src="stock.js?v=13"></script>
 </body>
 </html>

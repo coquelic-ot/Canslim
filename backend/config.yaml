@@ -1,0 +1,21 @@
+# IBD Digital ログイン情報
+ibd:
+  email: "your-email@example.com"
+  password: "your-password"
+
+# GitHub（JSON出力先）
+github:
+  token: "ghp_xxxxxxxxxxxxxxxxxxxx"
+  owner: "coquelic-ot"
+  repo: "Canslim"
+  branch: "gh-pages"
+  output_path: "data/canslim.json"
+
+# 分析設定
+settings:
+  # 週足データ取得期間
+  history_weeks: 52
+  # 出来高確認：ブレイク時に何%増し以上を良しとするか
+  min_breakout_volume_pct: 40
+  # S&P500比較用ベンチマーク
+  benchmark: "^GSPC"
